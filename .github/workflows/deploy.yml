@@ -25,6 +25,10 @@ jobs:
           aws-region: ap-south-1
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
 
+      - name: Verify AWS identity
+        run: |
+          aws sts get-caller-identity
+
       - name: Validate CloudFormation template
         run: |
           aws cloudformation validate-template \
@@ -37,7 +41,8 @@ jobs:
             --template-file cloudformation/infrastructure.yaml \
             --stack-name s3-glue-pipeline-infra \
             --region ap-south-1 \
-            --capabilities CAPABILITY_NAMED_IAM
+            --capabilities CAPABILITY_NAMED_IAM \
+            --role-arn "${{ secrets.CLOUDFORMATION_ROLE_ARN }}"
 
       - name: Deployment completed
         run: |
