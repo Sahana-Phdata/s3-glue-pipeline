@@ -1,8 +1,6 @@
-```yaml
 version: 0.2
 
 phases:
-
   install:
     commands:
       - 'echo "Starting CI/CD build..."'
@@ -25,4 +23,3 @@ phases:
     commands:
       - 'echo "CI/CD deployment completed."'
       - 'echo "Deployed stack: $ETL_STACK_NAME"'
-```
