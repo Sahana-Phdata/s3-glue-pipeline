@@ -1,0 +1,722 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: >
+  CI/CD pipeline for the S3 Glue Movie ETL project.
+  CodeConnections, CodePipeline and CodeBuild run in us-east-1
+  and deploy the ETL infrastructure to ap-south-1.
+
+Parameters:
+
+  # --------------------------------------------------
+  # GITHUB CONNECTION
+  # --------------------------------------------------
+
+  GitHubConnectionArn:
+    Type: String
+    Description: ARN of the AWS CodeConnections connection to GitHub
+
+  GitHubRepository:
+    Type: String
+    Default: Sahana-Phdata/s3-glue-pipeline
+    Description: GitHub repository in owner/repository format
+
+  GitHubBranch:
+    Type: String
+    Default: main
+    Description: GitHub branch used for CI/CD
+
+  # --------------------------------------------------
+  # DEPLOYMENT REGION
+  # --------------------------------------------------
+
+  DeploymentRegion:
+    Type: String
+    Default: ap-south-1
+    Description: AWS region where the ETL infrastructure is deployed
+
+  # --------------------------------------------------
+  # EXISTING ETL S3 BUCKET
+  # --------------------------------------------------
+
+  DeploymentBucketName:
+    Type: String
+    Description: >
+      Existing S3 bucket created by the ETL infrastructure stack.
+      Used by CodeBuild to upload the Glue job script.
+
+
+Resources:
+
+  # ==================================================
+  # CODEPIPELINE ARTIFACT BUCKET
+  # ==================================================
+
+  PipelineArtifactBucket:
+    Type: AWS::S3::Bucket
+
+    Properties:
+
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
+      VersioningConfiguration:
+        Status: Enabled
+
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldArtifacts
+            Status: Enabled
+            ExpirationInDays: 7
+
+
+  # ==================================================
+  # ARTIFACT BUCKET SECURITY POLICY
+  # ==================================================
+
+  PipelineArtifactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+
+    Properties:
+
+      Bucket: !Ref PipelineArtifactBucket
+
+      PolicyDocument:
+        Version: '2012-10-17'
+
+        Statement:
+
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+
+            Principal: "*"
+
+            Action: "s3:*"
+
+            Resource:
+              - !GetAtt PipelineArtifactBucket.Arn
+              - !Sub "${PipelineArtifactBucket.Arn}/*"
+
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+
+  # ==================================================
+  # CLOUDFORMATION EXECUTION ROLE
+  # ==================================================
+
+  CloudFormationExecutionRole:
+    Type: AWS::IAM::Role
+
+    Properties:
+
+      RoleName: movie-etl-cloudformation-role
+
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+
+        Statement:
+
+          - Effect: Allow
+
+            Principal:
+              Service:
+                - cloudformation.amazonaws.com
+
+            Action:
+              - sts:AssumeRole
+
+      Policies:
+
+        # ----------------------------------------------
+        # S3 PERMISSIONS
+        # ----------------------------------------------
+
+        - PolicyName: CloudFormationS3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+
+            Statement:
+
+              - Effect: Allow
+
+                Action:
+                  - s3:CreateBucket
+                  - s3:DeleteBucket
+                  - s3:PutBucketPolicy
+                  - s3:DeleteBucketPolicy
+                  - s3:PutBucketPublicAccessBlock
+                  - s3:PutBucketOwnershipControls
+                  - s3:PutBucketEncryption
+                  - s3:PutBucketVersioning
+                  - s3:PutLifecycleConfiguration
+                  - s3:GetBucket*
+                  - s3:ListBucket
+
+                Resource: "*"
+
+              - Effect: Allow
+
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+
+                Resource: "arn:aws:s3:::*/*"
+
+
+        # ----------------------------------------------
+        # IAM ROLE MANAGEMENT
+        # ----------------------------------------------
+
+        - PolicyName: CloudFormationIAMAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+
+            Statement:
+
+              - Effect: Allow
+
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:GetRole
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:PassRole
+
+                Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/movie-etl-*"
+
+
+        # ----------------------------------------------
+        # LAMBDA
+        # ----------------------------------------------
+
+        - PolicyName: CloudFormationLambdaAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+
+            Statement:
+
+              - Effect: Allow
+
+                Action:
+                  - lambda:CreateFunction
+                  - lambda:DeleteFunction
+                  - lambda:GetFunction
+                  - lambda:UpdateFunctionCode
+                  - lambda:UpdateFunctionConfiguration
+                  - lambda:AddPermission
+                  - lambda:RemovePermission
+                  - lambda:GetPolicy
+
+                Resource: "*"
+
+
+        # ----------------------------------------------
+        # EVENTBRIDGE
+        # ----------------------------------------------
+
+        - PolicyName: CloudFormationEventBridgeAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+
+            Statement:
+
+              - Effect: Allow
+
+                Action:
+                  - events:PutRule
+                  - events:DeleteRule
+                  - events:DescribeRule
+                  - events:PutTargets
+                  - events:RemoveTargets
+                  - events:ListTargetsByRule
+
+                Resource: "*"
+
+
+        # ----------------------------------------------
+        # GLUE
+        # ----------------------------------------------
+
+        - PolicyName: CloudFormationGlueAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+
+            Statement:
+
+              - Effect: Allow
+
+                Action:
+                  - glue:CreateJob
+                  - glue:UpdateJob
+                  - glue:DeleteJob
+                  - glue:GetJob
+                  - glue:CreateCrawler
+                  - glue:UpdateCrawler
+                  - glue:DeleteCrawler
+                  - glue:GetCrawler
+                  - glue:CreateDatabase
+                  - glue:UpdateDatabase
+                  - glue:DeleteDatabase
+                  - glue:GetDatabase
+                  - glue:CreateWorkflow
+                  - glue:UpdateWorkflow
+                  - glue:DeleteWorkflow
+                  - glue:GetWorkflow
+                  - glue:CreateTrigger
+                  - glue:UpdateTrigger
+                  - glue:DeleteTrigger
+                  - glue:GetTrigger
+
+                Resource: "*"
+
+
+        # ----------------------------------------------
+        # CLOUDWATCH LOGS
+        # ----------------------------------------------
+
+        - PolicyName: CloudFormationLogsAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+
+            Statement:
+
+              - Effect: Allow
+
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DeleteLogGroup
+                  - logs:PutRetentionPolicy
+                  - logs:DeleteRetentionPolicy
+
+                Resource: "*"
+
+
+  # ==================================================
+  # CODEBUILD SERVICE ROLE
+  # ==================================================
+
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+
+    Properties:
+
+      RoleName: movie-etl-codebuild-role
+
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+
+        Statement:
+
+          - Effect: Allow
+
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+
+            Action:
+              - sts:AssumeRole
+
+      Policies:
+
+        # ----------------------------------------------
+        # CLOUDWATCH LOGS
+        # ----------------------------------------------
+
+        - PolicyName: CodeBuildCloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+
+            Statement:
+
+              - Effect: Allow
+
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+
+                Resource: "*"
+
+
+        # ----------------------------------------------
+        # READ CODEPIPELINE ARTIFACTS
+        # ----------------------------------------------
+
+        - PolicyName: CodeBuildArtifactAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+
+            Statement:
+
+              - Effect: Allow
+
+                Action:
+                  - s3:GetBucketVersioning
+
+                Resource:
+                  - !GetAtt PipelineArtifactBucket.Arn
+
+              - Effect: Allow
+
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+
+                Resource:
+                  - !Sub "${PipelineArtifactBucket.Arn}/*"
+
+
+        # ----------------------------------------------
+        # UPLOAD GLUE JOB SCRIPT
+        # ----------------------------------------------
+
+        - PolicyName: CodeBuildGlueScriptUpload
+          PolicyDocument:
+            Version: '2012-10-17'
+
+            Statement:
+
+              - Effect: Allow
+
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+
+                Resource:
+                  - !Sub "arn:aws:s3:::${DeploymentBucketName}/glue/*"
+
+
+        # ----------------------------------------------
+        # CLOUDFORMATION DEPLOYMENT
+        # ----------------------------------------------
+
+        - PolicyName: CodeBuildCloudFormationDeploy
+          PolicyDocument:
+            Version: '2012-10-17'
+
+            Statement:
+
+              - Effect: Allow
+
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:UpdateStack
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:GetTemplate
+                  - cloudformation:ValidateTemplate
+
+                Resource: "*"
+
+
+        # ----------------------------------------------
+        # PASS CLOUDFORMATION ROLE
+        # ----------------------------------------------
+
+        - PolicyName: CodeBuildPassCloudFormationRole
+          PolicyDocument:
+            Version: '2012-10-17'
+
+            Statement:
+
+              - Effect: Allow
+
+                Action:
+                  - iam:PassRole
+
+                Resource: !GetAtt CloudFormationExecutionRole.Arn
+
+
+  # ==================================================
+  # CODEBUILD PROJECT
+  # ==================================================
+
+  MovieETLCodeBuild:
+    Type: AWS::CodeBuild::Project
+
+    Properties:
+
+      Name: movie-etl-codebuild
+
+      Description: >
+        Builds and deploys the S3 Glue Movie ETL project.
+
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+
+      Artifacts:
+        Type: CODEPIPELINE
+
+      Source:
+        Type: CODEPIPELINE
+
+      Environment:
+
+        Type: LINUX_CONTAINER
+
+        ComputeType: BUILD_GENERAL1_SMALL
+
+        Image: aws/codebuild/standard:7.0
+
+        PrivilegedMode: false
+
+        EnvironmentVariables:
+
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref DeploymentRegion
+
+          - Name: DEPLOYMENT_BUCKET
+            Value: !Ref DeploymentBucketName
+
+          - Name: ETL_STACK_NAME
+            Value: s3-glue-pipeline-infra
+
+          - Name: CLOUDFORMATION_ROLE_ARN
+            Value: !GetAtt CloudFormationExecutionRole.Arn
+
+      TimeoutInMinutes: 15
+
+      LogsConfig:
+
+        CloudWatchLogs:
+          Status: ENABLED
+
+
+  # ==================================================
+  # CODEPIPELINE SERVICE ROLE
+  # ==================================================
+
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+
+    Properties:
+
+      RoleName: movie-etl-codepipeline-role
+
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+
+        Statement:
+
+          - Effect: Allow
+
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+
+            Action:
+              - sts:AssumeRole
+
+      Policies:
+
+        # ----------------------------------------------
+        # GITHUB CODECONNECTIONS
+        # ----------------------------------------------
+
+        - PolicyName: CodePipelineGitHubConnection
+          PolicyDocument:
+            Version: '2012-10-17'
+
+            Statement:
+
+              - Effect: Allow
+
+                Action:
+                  - codeconnections:UseConnection
+
+                Resource: !Ref GitHubConnectionArn
+
+
+        # ----------------------------------------------
+        # ARTIFACT BUCKET
+        # ----------------------------------------------
+
+        - PolicyName: CodePipelineArtifactAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+
+            Statement:
+
+              - Effect: Allow
+
+                Action:
+                  - s3:GetBucketVersioning
+
+                Resource:
+                  - !GetAtt PipelineArtifactBucket.Arn
+
+              - Effect: Allow
+
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+
+                Resource:
+                  - !Sub "${PipelineArtifactBucket.Arn}/*"
+
+
+        # ----------------------------------------------
+        # CODEBUILD
+        # ----------------------------------------------
+
+        - PolicyName: CodePipelineCodeBuildAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+
+            Statement:
+
+              - Effect: Allow
+
+                Action:
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StopBuild
+
+                Resource: !GetAtt MovieETLCodeBuild.Arn
+
+
+  # ==================================================
+  # CODEPIPELINE
+  # ==================================================
+
+  MovieETLPipeline:
+    Type: AWS::CodePipeline::Pipeline
+
+    Properties:
+
+      Name: movie-etl-pipeline
+
+      RoleArn: !GetAtt CodePipelineServiceRole.Arn
+
+      PipelineType: V2
+
+      ExecutionMode: SUPERSEDED
+
+      ArtifactStore:
+        Type: S3
+        Location: !Ref PipelineArtifactBucket
+
+      Stages:
+
+        # ----------------------------------------------
+        # SOURCE
+        # ----------------------------------------------
+
+        - Name: Source
+
+          Actions:
+
+            - Name: GitHubSource
+
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: '1'
+
+              OutputArtifacts:
+                - Name: SourceOutput
+
+              Configuration:
+
+                ConnectionArn: !Ref GitHubConnectionArn
+
+                FullRepositoryId: !Ref GitHubRepository
+
+                BranchName: !Ref GitHubBranch
+
+                DetectChanges: true
+
+              RunOrder: 1
+
+
+        # ----------------------------------------------
+        # BUILD + DEPLOY
+        # ----------------------------------------------
+
+        - Name: Build
+
+          Actions:
+
+            - Name: BuildAndDeploy
+
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+
+              InputArtifacts:
+                - Name: SourceOutput
+
+              Configuration:
+
+                ProjectName: !Ref MovieETLCodeBuild
+
+              RunOrder: 1
+
+      RestartExecutionOnUpdate: true
+
+
+# ==================================================
+# OUTPUTS
+# ==================================================
+
+Outputs:
+
+  # ----------------------------------------------
+  # PIPELINE
+  # ----------------------------------------------
+
+  PipelineName:
+    Description: CodePipeline name
+    Value: !Ref MovieETLPipeline
+
+
+  # ----------------------------------------------
+  # CODEBUILD
+  # ----------------------------------------------
+
+  CodeBuildProjectName:
+    Description: CodeBuild project name
+    Value: !Ref MovieETLCodeBuild
+
+
+  # ----------------------------------------------
+  # ARTIFACT BUCKET
+  # ----------------------------------------------
+
+  ArtifactBucketName:
+    Description: CodePipeline artifact bucket
+    Value: !Ref PipelineArtifactBucket
+
+
+  # ----------------------------------------------
+  # CLOUDFORMATION ROLE
+  # ----------------------------------------------
+
+  CloudFormationExecutionRoleArn:
+    Description: CloudFormation execution role ARN
+    Value: !GetAtt CloudFormationExecutionRole.Arn
