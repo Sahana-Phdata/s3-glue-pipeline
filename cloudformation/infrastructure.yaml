@@ -16,6 +16,8 @@ Resources:
 
     Properties:
 
+      BucketName: !Sub "movie-etl-input-${AWS::AccountId}-${AWS::Region}"
+
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -42,8 +44,6 @@ Resources:
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 7
 
-     
-
 
   # --------------------------------------------------
   # OUTPUT S3 BUCKET
@@ -56,6 +56,8 @@ Resources:
     UpdateReplacePolicy: Delete
 
     Properties:
+
+      BucketName: !Sub "movie-etl-output-${AWS::AccountId}-${AWS::Region}"
 
       BucketEncryption:
         ServerSideEncryptionConfiguration:
@@ -200,7 +202,7 @@ Resources:
 
             Statement:
 
-              # Read from input/pipeline bucket
+              # Read from input bucket
               - Effect: Allow
 
                 Action:
@@ -261,8 +263,11 @@ Resources:
       Role: !GetAtt GlueJobRole.Arn
 
       Command:
+
         Name: pythonshell
+
         PythonVersion: "3.9"
+
         ScriptLocation: !Sub "s3://${PipelineBucket}/glue/glue_job.py"
 
       DefaultArguments:
@@ -362,6 +367,7 @@ Resources:
       Timeout: 30
 
       Environment:
+
         Variables:
           WORKFLOW_NAME: !Ref MovieETLWorkflow
 
@@ -416,12 +422,14 @@ Resources:
       CatalogId: !Ref AWS::AccountId
 
       DatabaseInput:
+
         Name: movie_etl_db
+
         Description: Data Catalog database for movie ETL
 
 
   # --------------------------------------------------
-  # GLUE CRAWLER IAM ROLE
+  # GLUE INPUT CRAWLER IAM ROLE
   # --------------------------------------------------
 
   GlueCrawlerRole:
@@ -499,7 +507,7 @@ Resources:
 
 
   # --------------------------------------------------
-  # GLUE CRAWLER
+  # INPUT GLUE CRAWLER
   # --------------------------------------------------
 
   MovieInputCrawler:
@@ -522,35 +530,65 @@ Resources:
       SchemaChangePolicy:
 
         UpdateBehavior: UPDATE_IN_DATABASE
+
         DeleteBehavior: LOG
 
       RecrawlPolicy:
 
         RecrawlBehavior: CRAWL_EVERYTHING
 
+
+  # --------------------------------------------------
+  # START INPUT CRAWLER
+  # --------------------------------------------------
+
   StartMovieETLTrigger:
     Type: AWS::Glue::Trigger
+
     Properties:
+
       Name: movie-etl-start-trigger
+
       Type: ON_DEMAND
+
       WorkflowName: !Ref MovieETLWorkflow
+
       Actions:
+
         - CrawlerName: !Ref MovieInputCrawler
+
+
+  # --------------------------------------------------
+  # RUN GLUE JOB AFTER INPUT CRAWLER
+  # --------------------------------------------------
 
   RunMovieETLJobTrigger:
     Type: AWS::Glue::Trigger
+
     Properties:
+
       Name: movie-etl-job-trigger
+
       Type: CONDITIONAL
+
       WorkflowName: !Ref MovieETLWorkflow
+
       StartOnCreation: true
+
       Predicate:
+
         Logical: AND
+
         Conditions:
+
           - LogicalOperator: EQUALS
+
             CrawlerName: !Ref MovieInputCrawler
+
             CrawlState: SUCCEEDED
+
       Actions:
+
         - JobName: !Ref MovieETLJob
 
 
@@ -560,34 +598,60 @@ Resources:
 
   S3MovieUploadRule:
     Type: AWS::Events::Rule
+
     Properties:
+
       Name: movie-s3-upload-trigger
+
       Description: Trigger Lambda when a movie CSV is uploaded to the input prefix
+
       EventPattern:
+
         source:
           - aws.s3
+
         detail-type:
           - Object Created
+
         detail:
+
           bucket:
+
             name:
               - !Ref PipelineBucket
+
           object:
+
             key:
               - prefix: input/
+
       State: ENABLED
+
       Targets:
+
         - Arn: !GetAtt StartMovieETL.Arn
+
           Id: StartMovieETLTarget
+
+
+  # --------------------------------------------------
+  # ALLOW EVENTBRIDGE TO INVOKE LAMBDA
+  # --------------------------------------------------
 
   AllowEventBridgeInvokeLambda:
     Type: AWS::Lambda::Permission
+
     Properties:
+
       FunctionName: !Ref StartMovieETL
+
       Action: lambda:InvokeFunction
+
       Principal: events.amazonaws.com
+
       SourceArn: !GetAtt S3MovieUploadRule.Arn
-  
+
+
   # --------------------------------------------------
   # OUTPUT CRAWLER IAM ROLE
   # --------------------------------------------------
@@ -596,35 +660,49 @@ Resources:
     Type: AWS::IAM::Role
 
     Properties:
+
       RoleName: movie-etl-output-crawler-role
 
       AssumeRolePolicyDocument:
+
         Version: '2012-10-17'
+
         Statement:
+
           - Effect: Allow
+
             Principal:
               Service:
                 - glue.amazonaws.com
+
             Action:
               - sts:AssumeRole
 
       Policies:
+
         - PolicyName: GlueOutputCrawlerS3AndCatalogAccess
+
           PolicyDocument:
+
             Version: '2012-10-17'
+
             Statement:
 
               # Read transformed movie files from output S3
               - Effect: Allow
+
                 Action:
                   - s3:GetObject
                   - s3:ListBucket
+
                 Resource:
                   - !GetAtt OutputBucket.Arn
                   - !Sub "${OutputBucket.Arn}/output/*"
 
+
               # Create/update Glue Catalog objects
               - Effect: Allow
+
                 Action:
                   - glue:GetDatabase
                   - glue:GetDatabases
@@ -637,14 +715,18 @@ Resources:
                   - glue:UpdatePartition
                   - glue:GetPartition
                   - glue:GetPartitions
+
                 Resource: "*"
+
 
               # CloudWatch Logs
               - Effect: Allow
+
                 Action:
                   - logs:CreateLogGroup
                   - logs:CreateLogStream
                   - logs:PutLogEvents
+
                 Resource: "*"
 
 
@@ -656,6 +738,7 @@ Resources:
     Type: AWS::Glue::Crawler
 
     Properties:
+
       Name: movie-output-crawler
 
       Role: !GetAtt GlueOutputCrawlerRole.Arn
@@ -663,14 +746,19 @@ Resources:
       DatabaseName: !Ref MovieDatabase
 
       Targets:
+
         S3Targets:
+
           - Path: !Sub "s3://${OutputBucket}/output/"
 
       SchemaChangePolicy:
+
         UpdateBehavior: UPDATE_IN_DATABASE
+
         DeleteBehavior: LOG
 
       RecrawlPolicy:
+
         RecrawlBehavior: CRAWL_EVERYTHING
 
 
@@ -682,6 +770,7 @@ Resources:
     Type: AWS::Glue::Trigger
 
     Properties:
+
       Name: movie-output-crawler-trigger
 
       Type: CONDITIONAL
@@ -691,14 +780,21 @@ Resources:
       StartOnCreation: true
 
       Predicate:
+
         Logical: AND
+
         Conditions:
+
           - LogicalOperator: EQUALS
+
             JobName: !Ref MovieETLJob
+
             State: SUCCEEDED
 
       Actions:
+
         - CrawlerName: !Ref MovieOutputCrawler
+
 
 # --------------------------------------------------
 # OUTPUTS
@@ -707,40 +803,56 @@ Resources:
 Outputs:
 
   BucketName:
-    Description: Name of the pipeline S3 bucket
+
+    Description: Name of the pipeline input S3 bucket
+
     Value: !Ref PipelineBucket
 
 
   BucketArn:
-    Description: ARN of the pipeline S3 bucket
+
+    Description: ARN of the pipeline input S3 bucket
+
     Value: !GetAtt PipelineBucket.Arn
 
 
   OutputBucketName:
+
     Description: Name of the transformed data S3 bucket
+
     Value: !Ref OutputBucket
 
 
   OutputBucketArn:
+
     Description: ARN of the transformed data S3 bucket
+
     Value: !GetAtt OutputBucket.Arn
 
 
   WorkflowName:
+
     Description: Glue workflow name
+
     Value: !Ref MovieETLWorkflow
 
 
   LambdaName:
+
     Description: Lambda function name
+
     Value: !Ref StartMovieETL
 
 
   DatabaseName:
+
     Description: Glue Data Catalog database
+
     Value: !Ref MovieDatabase
 
 
   CrawlerName:
-    Description: Glue crawler name
+
+    Description: Glue input crawler name
+
     Value: !Ref MovieInputCrawler
