@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   destroy:
-    name: Destroy CloudFormation Stack
+    name: Destroy Complete ETL Infrastructure
     runs-on: ubuntu-latest
 
     steps:
@@ -24,6 +24,7 @@ jobs:
 
       - name: Verify AWS identity
         run: |
+          echo "AWS identity:"
           aws sts get-caller-identity
 
       - name: Check CloudFormation stack
@@ -32,16 +33,78 @@ jobs:
           if aws cloudformation describe-stacks \
             --stack-name s3-glue-pipeline-infra \
             --region ap-south-1 >/dev/null 2>&1; then
+
             echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "Stack exists."
+            echo "CloudFormation stack exists."
+
           else
+
             echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "Stack does not exist."
+            echo "CloudFormation stack does not exist."
+
+          fi
+
+      - name: Get S3 bucket names
+        if: steps.check-stack.outputs.exists == 'true'
+        id: get-buckets
+        run: |
+          INPUT_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name s3-glue-pipeline-infra \
+            --region ap-south-1 \
+            --query "Stacks[0].Outputs[?OutputKey=='BucketName'].OutputValue" \
+            --output text)
+
+          OUTPUT_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name s3-glue-pipeline-infra \
+            --region ap-south-1 \
+            --query "Stacks[0].Outputs[?OutputKey=='OutputBucketName'].OutputValue" \
+            --output text)
+
+          echo "Input bucket: $INPUT_BUCKET"
+          echo "Output bucket: $OUTPUT_BUCKET"
+
+          echo "input_bucket=$INPUT_BUCKET" >> "$GITHUB_OUTPUT"
+          echo "output_bucket=$OUTPUT_BUCKET" >> "$GITHUB_OUTPUT"
+
+      - name: Empty input S3 bucket
+        if: steps.check-stack.outputs.exists == 'true'
+        run: |
+          INPUT_BUCKET="${{ steps.get-buckets.outputs.input_bucket }}"
+
+          if [ -n "$INPUT_BUCKET" ] && [ "$INPUT_BUCKET" != "None" ]; then
+            echo "Emptying input bucket: $INPUT_BUCKET"
+
+            aws s3 rm "s3://$INPUT_BUCKET" \
+              --recursive \
+              --region ap-south-1
+
+            echo "Input bucket emptied successfully."
+          else
+            echo "Input bucket name was not found."
+          fi
+
+      - name: Empty output S3 bucket
+        if: steps.check-stack.outputs.exists == 'true'
+        run: |
+          OUTPUT_BUCKET="${{ steps.get-buckets.outputs.output_bucket }}"
+
+          if [ -n "$OUTPUT_BUCKET" ] && [ "$OUTPUT_BUCKET" != "None" ]; then
+            echo "Emptying output bucket: $OUTPUT_BUCKET"
+
+            aws s3 rm "s3://$OUTPUT_BUCKET" \
+              --recursive \
+              --region ap-south-1
+
+            echo "Output bucket emptied successfully."
+          else
+            echo "Output bucket name was not found."
           fi
 
       - name: Delete CloudFormation stack
         if: steps.check-stack.outputs.exists == 'true'
         run: |
+          echo "Deleting complete ETL infrastructure stack..."
+
           aws cloudformation delete-stack \
             --stack-name s3-glue-pipeline-infra \
             --region ap-south-1
@@ -52,9 +115,14 @@ jobs:
             --stack-name s3-glue-pipeline-infra \
             --region ap-south-1
 
-          echo "CloudFormation stack deleted successfully."
+          echo "========================================="
+          echo "Complete ETL infrastructure deleted."
+          echo "========================================="
 
       - name: Nothing to delete
         if: steps.check-stack.outputs.exists == 'false'
         run: |
-          echo "CloudFormation stack does not exist. Nothing to delete."
+          echo "========================================="
+          echo "CloudFormation stack does not exist."
+          echo "Nothing to delete."
+          echo "========================================="
