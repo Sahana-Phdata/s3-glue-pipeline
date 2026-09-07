@@ -1,0 +1,60 @@
+name: Destroy AWS Infrastructure
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  destroy:
+    name: Destroy CloudFormation Stack
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ap-south-1
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+
+      - name: Verify AWS identity
+        run: |
+          aws sts get-caller-identity
+
+      - name: Check CloudFormation stack
+        id: check-stack
+        run: |
+          if aws cloudformation describe-stacks \
+            --stack-name s3-glue-pipeline-infra \
+            --region ap-south-1 >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Stack exists."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Stack does not exist."
+          fi
+
+      - name: Delete CloudFormation stack
+        if: steps.check-stack.outputs.exists == 'true'
+        run: |
+          aws cloudformation delete-stack \
+            --stack-name s3-glue-pipeline-infra \
+            --region ap-south-1
+
+          echo "Waiting for CloudFormation stack deletion..."
+
+          aws cloudformation wait stack-delete-complete \
+            --stack-name s3-glue-pipeline-infra \
+            --region ap-south-1
+
+          echo "CloudFormation stack deleted successfully."
+
+      - name: Nothing to delete
+        if: steps.check-stack.outputs.exists == 'false'
+        run: |
+          echo "CloudFormation stack does not exist. Nothing to delete."
