@@ -1,28 +1,28 @@
+```yaml
 version: 0.2
 
 phases:
 
   install:
     commands:
-      - echo "Starting CI/CD build..."
-      - aws --version
-      - python --version
+      - 'echo "Starting CI/CD build..."'
+      - 'aws --version'
+      - 'python --version'
 
   pre_build:
     commands:
-      - echo "Validating CloudFormation template..."
-      - aws cloudformation validate-template --template-body file://cloudformation/infrastructure.yaml --region $AWS_DEFAULT_REGION
+      - 'echo "Validating CloudFormation template..."'
+      - 'aws cloudformation validate-template --template-body file://cloudformation/infrastructure.yaml --region $AWS_DEFAULT_REGION'
 
   build:
     commands:
-      - echo "Uploading Glue job script..."
-      - aws s3 cp glue/glue_job.py s3://$DEPLOYMENT_BUCKET/glue/glue_job.py
-
-      - echo "Deploying ETL infrastructure..."
-      - aws cloudformation deploy --template-file cloudformation/infrastructure.yaml --stack-name $ETL_STACK_NAME --region $AWS_DEFAULT_REGION --capabilities CAPABILITY_NAMED_IAM
+      - 'echo "Uploading Glue job script..."'
+      - 'aws s3 cp glue/glue_job.py s3://$DEPLOYMENT_BUCKET/glue/glue_job.py'
+      - 'echo "Deploying ETL infrastructure..."'
+      - 'aws cloudformation deploy --template-file cloudformation/infrastructure.yaml --stack-name $ETL_STACK_NAME --region $AWS_DEFAULT_REGION --capabilities CAPABILITY_NAMED_IAM'
 
   post_build:
     commands:
-      - echo "CI/CD deployment completed."
-      - echo "Deployed stack: $ETL_STACK_NAME"
-      - echo "Deployment region: $AWS_DEFAULT_REGION"
+      - 'echo "CI/CD deployment completed."'
+      - 'echo "Deployed stack: $ETL_STACK_NAME"'
+```
