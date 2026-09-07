@@ -27,16 +27,59 @@ jobs:
 
       - name: Verify AWS identity
         run: |
+          echo "AWS identity:"
           aws sts get-caller-identity
+
+      - name: Wait before CloudFormation deployment
+        run: |
+          echo "Waiting 10 seconds before checking CloudFormation..."
+          sleep 10
+
+      - name: Check CloudFormation stack state
+        id: check-stack
+        shell: bash
+        run: |
+          STATUS=$(aws cloudformation describe-stacks \
+            --stack-name s3-glue-pipeline-infra \
+            --region ap-south-1 \
+            --query "Stacks[0].StackStatus" \
+            --output text 2>/dev/null || echo "DOES_NOT_EXIST")
+
+          echo "Current stack status: $STATUS"
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+
+      - name: Delete failed rollback stack
+        if: steps.check-stack.outputs.status == 'ROLLBACK_COMPLETE'
+        run: |
+          echo "Stack is in ROLLBACK_COMPLETE."
+          echo "Deleting failed stack before recreating it..."
+
+          aws cloudformation delete-stack \
+            --stack-name s3-glue-pipeline-infra \
+            --region ap-south-1
+
+          echo "Waiting for failed stack deletion to complete..."
+
+          aws cloudformation wait stack-delete-complete \
+            --stack-name s3-glue-pipeline-infra \
+            --region ap-south-1
+
+          echo "Failed stack deleted successfully."
 
       - name: Validate CloudFormation template
         run: |
+          echo "Validating CloudFormation template..."
+
           aws cloudformation validate-template \
             --template-body file://cloudformation/infrastructure.yaml \
             --region ap-south-1
 
+          echo "CloudFormation template validation successful."
+
       - name: Deploy CloudFormation stack
         run: |
+          echo "Deploying CloudFormation infrastructure..."
+
           aws cloudformation deploy \
             --template-file cloudformation/infrastructure.yaml \
             --stack-name s3-glue-pipeline-infra \
@@ -44,7 +87,16 @@ jobs:
             --capabilities CAPABILITY_NAMED_IAM \
             --role-arn "${{ secrets.CLOUDFORMATION_ROLE_ARN }}"
 
-      - name: Deployment completed
+          echo "========================================="
+          echo "CloudFormation deployment successful."
+          echo "========================================="
+
+      - name: Show stack outputs
         run: |
-          echo "CloudFormation deployment completed successfully."
-          echo "Stack: s3-glue-pipeline-infra"
+          echo "CloudFormation stack outputs:"
+
+          aws cloudformation describe-stacks \
+            --stack-name s3-glue-pipeline-infra \
+            --region ap-south-1 \
+            --query "Stacks[0].Outputs[*].[OutputKey,OutputValue]" \
+            --output table
