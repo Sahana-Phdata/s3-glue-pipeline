@@ -415,7 +415,7 @@ Resources:
 
               - Effect: Allow
 
-                Action:
+                 Action:
                   - cloudformation:CreateStack
                   - cloudformation:UpdateStack
                   - cloudformation:CreateChangeSet
@@ -426,6 +426,7 @@ Resources:
                   - cloudformation:DescribeStackEvents
                   - cloudformation:DescribeStackResources
                   - cloudformation:GetTemplate
+                  - cloudformation:GetTemplateSummary
                   - cloudformation:ValidateTemplate
 
                 Resource: "*"
