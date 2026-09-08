@@ -162,15 +162,11 @@ jobs:
           OUTPUT_BUCKET="${{ steps.get-buckets.outputs.output_bucket }}"
 
           echo "Verifying input/ folder..."
-          aws s3api head-object \
-            --bucket "$INPUT_BUCKET" \
-            --key "input/" \
+          aws s3 ls "s3://$INPUT_BUCKET/input/" \
             --region ap-south-1
 
           echo "Verifying output/ folder..."
-          aws s3api head-object \
-            --bucket "$OUTPUT_BUCKET" \
-            --key "output/" \
+          aws s3 ls "s3://$OUTPUT_BUCKET/output/" \
             --region ap-south-1
 
           echo "S3 folders verified successfully."
