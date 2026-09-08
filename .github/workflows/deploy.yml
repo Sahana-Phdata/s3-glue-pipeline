@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+
   workflow_dispatch:
 
 permissions:
@@ -11,34 +12,77 @@ permissions:
   contents: read
 
 jobs:
+
   deploy:
+
     name: Deploy CloudFormation Stack
+
     runs-on: ubuntu-latest
 
     steps:
+
+      # --------------------------------------------------
+      # CHECKOUT CODE
+      # --------------------------------------------------
+
       - name: Checkout repository
+
         uses: actions/checkout@v4
 
+
+      # --------------------------------------------------
+      # CONFIGURE AWS CREDENTIALS
+      # --------------------------------------------------
+
       - name: Configure AWS credentials
+
         uses: aws-actions/configure-aws-credentials@v4
+
         with:
+
           aws-region: ap-south-1
+
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
 
+
+      # --------------------------------------------------
+      # VERIFY AWS IDENTITY
+      # --------------------------------------------------
+
       - name: Verify AWS identity
+
         run: |
+
           echo "AWS identity:"
+
           aws sts get-caller-identity
 
+
+      # --------------------------------------------------
+      # WAIT BEFORE CLOUDFORMATION DEPLOYMENT
+      # --------------------------------------------------
+
       - name: Wait before CloudFormation deployment
+
         run: |
+
           echo "Waiting 10 seconds before checking CloudFormation..."
+
           sleep 10
 
+
+      # --------------------------------------------------
+      # CHECK EXISTING STACK STATUS
+      # --------------------------------------------------
+
       - name: Check CloudFormation stack state
+
         id: check-stack
+
         shell: bash
+
         run: |
+
           STATUS=$(aws cloudformation describe-stacks \
             --stack-name s3-glue-pipeline-infra \
             --region ap-south-1 \
@@ -46,19 +90,29 @@ jobs:
             --output text 2>/dev/null || echo "DOES_NOT_EXIST")
 
           echo "Current stack status: $STATUS"
+
           echo "status=$STATUS" >> "$GITHUB_OUTPUT"
 
+
+      # --------------------------------------------------
+      # DELETE FAILED ROLLBACK STACK
+      # --------------------------------------------------
+
       - name: Delete failed rollback stack
+
         if: steps.check-stack.outputs.status == 'ROLLBACK_COMPLETE'
+
         run: |
+
           echo "Stack is in ROLLBACK_COMPLETE."
+
           echo "Deleting failed stack before recreating it..."
 
           aws cloudformation delete-stack \
             --stack-name s3-glue-pipeline-infra \
             --region ap-south-1
 
-          echo "Waiting for failed stack deletion to complete..."
+          echo "Waiting for stack deletion to complete..."
 
           aws cloudformation wait stack-delete-complete \
             --stack-name s3-glue-pipeline-infra \
@@ -66,8 +120,15 @@ jobs:
 
           echo "Failed stack deleted successfully."
 
+
+      # --------------------------------------------------
+      # VALIDATE CLOUDFORMATION TEMPLATE
+      # --------------------------------------------------
+
       - name: Validate CloudFormation template
+
         run: |
+
           echo "Validating CloudFormation template..."
 
           aws cloudformation validate-template \
@@ -76,8 +137,15 @@ jobs:
 
           echo "CloudFormation template validation successful."
 
+
+      # --------------------------------------------------
+      # DEPLOY CLOUDFORMATION INFRASTRUCTURE
+      # --------------------------------------------------
+
       - name: Deploy CloudFormation stack
+
         run: |
+
           echo "Deploying CloudFormation infrastructure..."
 
           aws cloudformation deploy \
@@ -87,16 +155,95 @@ jobs:
             --capabilities CAPABILITY_NAMED_IAM \
             --role-arn "${{ secrets.CLOUDFORMATION_ROLE_ARN }}"
 
-          echo "========================================="
           echo "CloudFormation deployment successful."
-          echo "========================================="
+
+
+      # --------------------------------------------------
+      # GET INPUT BUCKET NAME
+      # --------------------------------------------------
+
+      - name: Get input bucket name
+
+        id: get-bucket
+
+        run: |
+
+          INPUT_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name s3-glue-pipeline-infra \
+            --region ap-south-1 \
+            --query "Stacks[0].Outputs[?OutputKey=='BucketName'].OutputValue" \
+            --output text)
+
+          echo "Input bucket: $INPUT_BUCKET"
+
+          echo "input_bucket=$INPUT_BUCKET" >> "$GITHUB_OUTPUT"
+
+
+      # --------------------------------------------------
+      # UPLOAD GLUE ETL SCRIPT
+      # --------------------------------------------------
+
+      - name: Upload Glue ETL script
+
+        run: |
+
+          INPUT_BUCKET="${{ steps.get-bucket.outputs.input_bucket }}"
+
+          echo "Uploading Glue ETL script..."
+
+          echo "Source: glue/glue_job.py"
+
+          echo "Destination: s3://$INPUT_BUCKET/glue/glue_job.py"
+
+          aws s3 cp \
+            glue/glue_job.py \
+            "s3://$INPUT_BUCKET/glue/glue_job.py" \
+            --region ap-south-1
+
+          echo "Glue ETL script uploaded successfully."
+
+
+      # --------------------------------------------------
+      # VERIFY GLUE ETL SCRIPT
+      # --------------------------------------------------
+
+      - name: Verify Glue ETL script
+
+        run: |
+
+          INPUT_BUCKET="${{ steps.get-bucket.outputs.input_bucket }}"
+
+          echo "Verifying Glue script in S3..."
+
+          aws s3 ls \
+            "s3://$INPUT_BUCKET/glue/glue_job.py" \
+            --region ap-south-1
+
+          echo "Glue ETL script verified successfully."
+
+
+      # --------------------------------------------------
+      # SHOW CLOUDFORMATION OUTPUTS
+      # --------------------------------------------------
 
       - name: Show stack outputs
+
         run: |
-          echo "CloudFormation stack outputs:"
+
+          echo "========================================="
+
+          echo "CloudFormation Stack Outputs"
+
+          echo "========================================="
 
           aws cloudformation describe-stacks \
             --stack-name s3-glue-pipeline-infra \
             --region ap-south-1 \
             --query "Stacks[0].Outputs[*].[OutputKey,OutputValue]" \
             --output table
+
+          echo "========================================="
+
+          echo "Deployment completed successfully."
+
+          echo "========================================="
