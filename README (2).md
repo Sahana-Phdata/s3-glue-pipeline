@@ -1,3 +1,4 @@
+# AWS S3 → Glue Event-Driven ETL Pipeline
 
 ## Overview
 
@@ -492,6 +493,46 @@ After cleanup, the infrastructure can be deployed again using the deployment wor
 
 ---
 
+# 19. Project Outcome
 
+The project demonstrates a complete automated ETL workflow where infrastructure is deployed through CI/CD and data processing is triggered automatically by an S3 upload.
 
+The final architecture is:
 
+```text
+              CI/CD
+        GitHub → GitHub Actions
+                     │
+                     ▼
+              CloudFormation
+                     │
+                     ▼
+                  AWS
+                     │
+     ┌───────────────┴────────────────┐
+     │                                │
+ Input S3                       AWS Glue Pipeline
+     │                                │
+     ▼                                │
+ EventBridge                         │
+     │                                │
+     ▼                                │
+ Lambda ──────────────────────────────┘
+                                      │
+                                      ▼
+                               Glue ETL Job
+                                      │
+                                      ▼
+                                Output S3
+                                      │
+                                      ▼
+                                Glue Catalog
+```
+
+---
+
+## Conclusion
+
+This project provides a simple, automated and reproducible AWS ETL pipeline.
+
+Infrastructure is managed as code using CloudFormation, deployment is automated through GitHub Actions, and data processing is triggered automatically when a new CSV file arrives in the S3 input location.
