@@ -1,12 +1,16 @@
 AWSTemplateFormatVersion: '2010-09-09'
 
-Description: S3 + Lambda + Glue Workflow for the ETL pipeline
+Description: >
+  Event-driven S3 to Lambda to AWS Glue ETL pipeline.
+  Creates the complete ETL infrastructure including S3 buckets,
+  IAM roles and policies, EventBridge, Lambda, Glue workflow,
+  Glue job, crawlers, triggers, and Data Catalog database.
 
 Resources:
 
-  # --------------------------------------------------
-  # INPUT / PIPELINE S3 BUCKET
-  # --------------------------------------------------
+  # ==========================================================
+  # INPUT S3 BUCKET
+  # ==========================================================
 
   PipelineBucket:
     Type: AWS::S3::Bucket
@@ -15,7 +19,6 @@ Resources:
     UpdateReplacePolicy: Delete
 
     Properties:
-
       BucketName: !Sub "movie-etl-input-${AWS::AccountId}-${AWS::Region}"
 
       BucketEncryption:
@@ -45,9 +48,9 @@ Resources:
               DaysAfterInitiation: 7
 
 
-  # --------------------------------------------------
+  # ==========================================================
   # OUTPUT S3 BUCKET
-  # --------------------------------------------------
+  # ==========================================================
 
   OutputBucket:
     Type: AWS::S3::Bucket
@@ -56,7 +59,6 @@ Resources:
     UpdateReplacePolicy: Delete
 
     Properties:
-
       BucketName: !Sub "movie-etl-output-${AWS::AccountId}-${AWS::Region}"
 
       BucketEncryption:
@@ -82,30 +84,27 @@ Resources:
               DaysAfterInitiation: 7
 
 
-  # --------------------------------------------------
-  # INPUT / PIPELINE BUCKET POLICY
-  # --------------------------------------------------
+  # ==========================================================
+  # INPUT BUCKET POLICY
+  # ==========================================================
 
   PipelineBucketPolicy:
     Type: AWS::S3::BucketPolicy
 
     Properties:
-
       Bucket: !Ref PipelineBucket
 
       PolicyDocument:
-
         Version: '2012-10-17'
 
         Statement:
 
           - Sid: DenyInsecureTransport
-
             Effect: Deny
-
             Principal: "*"
 
-            Action: "s3:*"
+            Action:
+              - s3:*
 
             Resource:
               - !GetAtt PipelineBucket.Arn
@@ -116,30 +115,27 @@ Resources:
                 aws:SecureTransport: false
 
 
-  # --------------------------------------------------
+  # ==========================================================
   # OUTPUT BUCKET POLICY
-  # --------------------------------------------------
+  # ==========================================================
 
   OutputBucketPolicy:
     Type: AWS::S3::BucketPolicy
 
     Properties:
-
       Bucket: !Ref OutputBucket
 
       PolicyDocument:
-
         Version: '2012-10-17'
 
         Statement:
 
           - Sid: DenyInsecureTransport
-
             Effect: Deny
-
             Principal: "*"
 
-            Action: "s3:*"
+            Action:
+              - s3:*
 
             Resource:
               - !GetAtt OutputBucket.Arn
@@ -150,31 +146,31 @@ Resources:
                 aws:SecureTransport: false
 
 
-  # --------------------------------------------------
+  # ==========================================================
   # GLUE WORKFLOW
-  # --------------------------------------------------
+  # ==========================================================
 
   MovieETLWorkflow:
     Type: AWS::Glue::Workflow
 
     Properties:
       Name: movie-etl-workflow
-      Description: Workflow for movie data ETL pipeline
+
+      Description: >
+        Workflow for the movie data ETL pipeline.
 
 
-  # --------------------------------------------------
+  # ==========================================================
   # GLUE JOB IAM ROLE
-  # --------------------------------------------------
+  # ==========================================================
 
   GlueJobRole:
     Type: AWS::IAM::Role
 
     Properties:
-
       RoleName: movie-etl-glue-job-role
 
       AssumeRolePolicyDocument:
-
         Version: '2012-10-17'
 
         Statement:
@@ -190,56 +186,95 @@ Resources:
 
       Policies:
 
-        # ----------------------------------------------
-        # S3 ACCESS
-        # ----------------------------------------------
+        # ------------------------------------------------------
+        # GLUE JOB S3 ACCESS
+        # ------------------------------------------------------
 
         - PolicyName: GlueJobS3Access
 
           PolicyDocument:
-
             Version: '2012-10-17'
 
             Statement:
 
-              # Read from input bucket
-              - Effect: Allow
+              # Read from the input bucket
+              - Sid: ReadInputBucket
+                Effect: Allow
 
                 Action:
-                  - s3:GetObject
                   - s3:ListBucket
 
                 Resource:
                   - !GetAtt PipelineBucket.Arn
-                  - !Sub "${PipelineBucket.Arn}/*"
+
+              - Sid: ReadInputObjects
+                Effect: Allow
+
+                Action:
+                  - s3:GetObject
+
+                Resource:
+                  - !Sub "${PipelineBucket.Arn}/input/*"
 
 
-              # Write to output bucket
-              - Effect: Allow
+              # Read/write required temporary files
+              - Sid: GlueTempBucketAccess
+                Effect: Allow
+
+                Action:
+                  - s3:ListBucket
+
+                Resource:
+                  - !GetAtt PipelineBucket.Arn
+
+              - Sid: GlueTempObjectAccess
+                Effect: Allow
+
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+
+                Resource:
+                  - !Sub "${PipelineBucket.Arn}/temp/*"
+
+
+              # Write transformed data to output bucket
+              - Sid: WriteOutputObjects
+                Effect: Allow
 
                 Action:
                   - s3:PutObject
                   - s3:GetObject
+
+                Resource:
+                  - !Sub "${OutputBucket.Arn}/output/*"
+
+
+              # List output bucket
+              - Sid: ListOutputBucket
+                Effect: Allow
+
+                Action:
                   - s3:ListBucket
 
                 Resource:
                   - !GetAtt OutputBucket.Arn
-                  - !Sub "${OutputBucket.Arn}/*"
 
 
-        # ----------------------------------------------
-        # CLOUDWATCH LOGS
-        # ----------------------------------------------
+        # ------------------------------------------------------
+        # GLUE JOB CLOUDWATCH LOGGING
+        # ------------------------------------------------------
 
         - PolicyName: GlueJobLogs
 
           PolicyDocument:
-
             Version: '2012-10-17'
 
             Statement:
 
-              - Effect: Allow
+              - Sid: WriteGlueLogs
+                Effect: Allow
 
                 Action:
                   - logs:CreateLogGroup
@@ -249,23 +284,20 @@ Resources:
                 Resource: "*"
 
 
-  # --------------------------------------------------
+  # ==========================================================
   # GLUE PYTHON SHELL JOB
-  # --------------------------------------------------
+  # ==========================================================
 
   MovieETLJob:
     Type: AWS::Glue::Job
 
     Properties:
-
       Name: movie-etl-job
 
       Role: !GetAtt GlueJobRole.Arn
 
       Command:
-
         Name: pythonshell
-
         PythonVersion: "3.9"
 
         ScriptLocation: !Sub "s3://${PipelineBucket}/glue/glue_job.py"
@@ -274,35 +306,37 @@ Resources:
 
         "--job-language": "python"
 
-        "--TempDir": !Sub "s3://${PipelineBucket}/temp/"
+        "--TempDir":
+          !Sub "s3://${PipelineBucket}/temp/"
 
         "--enable-continuous-cloudwatch-log": "true"
 
-        "--INPUT_BUCKET": !Ref PipelineBucket
+        "--INPUT_BUCKET":
+          !Ref PipelineBucket
 
-        "--OUTPUT_BUCKET": !Ref OutputBucket
+        "--OUTPUT_BUCKET":
+          !Ref OutputBucket
 
       MaxCapacity: 0.0625
 
       ExecutionProperty:
         MaxConcurrentRuns: 1
 
-      Description: Transform movie CSV data using Glue Python Shell
+      Description: >
+        Transform movie CSV data using Glue Python Shell.
 
 
-  # --------------------------------------------------
+  # ==========================================================
   # LAMBDA IAM ROLE
-  # --------------------------------------------------
+  # ==========================================================
 
   LambdaExecutionRole:
     Type: AWS::IAM::Role
 
     Properties:
-
       RoleName: movie-etl-lambda-role
 
       AssumeRolePolicyDocument:
-
         Version: '2012-10-17'
 
         Statement:
@@ -321,13 +355,13 @@ Resources:
         - PolicyName: LambdaStartGlueWorkflow
 
           PolicyDocument:
-
             Version: '2012-10-17'
 
             Statement:
 
-              # Allow Lambda to write its own logs
-              - Effect: Allow
+              # Lambda CloudWatch logs
+              - Sid: LambdaLogging
+                Effect: Allow
 
                 Action:
                   - logs:CreateLogGroup
@@ -337,25 +371,26 @@ Resources:
                 Resource: "*"
 
 
-              # Allow Lambda to start ONLY our workflow
-              - Effect: Allow
+              # Lambda can start ONLY this workflow
+              - Sid: StartMovieETLWorkflow
+                Effect: Allow
 
                 Action:
                   - glue:StartWorkflowRun
 
                 Resource:
-                  - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:workflow/movie-etl-workflow"
+                  - !Sub >
+                    arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:workflow/movie-etl-workflow
 
 
-  # --------------------------------------------------
+  # ==========================================================
   # LAMBDA FUNCTION
-  # --------------------------------------------------
+  # ==========================================================
 
   StartMovieETL:
     Type: AWS::Lambda::Function
 
     Properties:
-
       FunctionName: start-movie-etl
 
       Runtime: python3.12
@@ -367,12 +402,12 @@ Resources:
       Timeout: 30
 
       Environment:
-
         Variables:
-          WORKFLOW_NAME: !Ref MovieETLWorkflow
+
+          WORKFLOW_NAME:
+            !Ref MovieETLWorkflow
 
       Code:
-
         ZipFile: |
 
           import boto3
@@ -410,37 +445,37 @@ Resources:
               }
 
 
-  # --------------------------------------------------
+  # ==========================================================
   # GLUE DATABASE
-  # --------------------------------------------------
+  # ==========================================================
 
   MovieDatabase:
     Type: AWS::Glue::Database
 
     Properties:
 
-      CatalogId: !Ref AWS::AccountId
+      CatalogId:
+        !Ref AWS::AccountId
 
       DatabaseInput:
 
         Name: movie_etl_db
 
-        Description: Data Catalog database for movie ETL
+        Description: >
+          Data Catalog database for the movie ETL pipeline.
 
 
-  # --------------------------------------------------
-  # GLUE INPUT CRAWLER IAM ROLE
-  # --------------------------------------------------
+  # ==========================================================
+  # INPUT CRAWLER IAM ROLE
+  # ==========================================================
 
   GlueCrawlerRole:
     Type: AWS::IAM::Role
 
     Properties:
-
       RoleName: movie-etl-crawler-role
 
       AssumeRolePolicyDocument:
-
         Version: '2012-10-17'
 
         Statement:
@@ -456,28 +491,38 @@ Resources:
 
       Policies:
 
-        - PolicyName: GlueCrawlerS3AndCatalogAccess
+        - PolicyName: GlueInputCrawlerAccess
 
           PolicyDocument:
-
             Version: '2012-10-17'
 
             Statement:
 
-              # Read movie files from S3
-              - Effect: Allow
+              # List the input bucket
+              - Sid: ListInputBucket
+                Effect: Allow
 
                 Action:
-                  - s3:GetObject
                   - s3:ListBucket
 
                 Resource:
                   - !GetAtt PipelineBucket.Arn
+
+
+              # Read files under input/
+              - Sid: ReadInputFiles
+                Effect: Allow
+
+                Action:
+                  - s3:GetObject
+
+                Resource:
                   - !Sub "${PipelineBucket.Arn}/input/*"
 
 
-              # Create/update Glue Catalog objects
-              - Effect: Allow
+              # Glue Data Catalog access
+              - Sid: GlueCatalogAccess
+                Effect: Allow
 
                 Action:
                   - glue:GetDatabase
@@ -495,8 +540,9 @@ Resources:
                 Resource: "*"
 
 
-              # CloudWatch Logs
-              - Effect: Allow
+              # CloudWatch logs
+              - Sid: CrawlerLogging
+                Effect: Allow
 
                 Action:
                   - logs:CreateLogGroup
@@ -506,9 +552,9 @@ Resources:
                 Resource: "*"
 
 
-  # --------------------------------------------------
+  # ==========================================================
   # INPUT GLUE CRAWLER
-  # --------------------------------------------------
+  # ==========================================================
 
   MovieInputCrawler:
     Type: AWS::Glue::Crawler
@@ -517,15 +563,18 @@ Resources:
 
       Name: movie-input-crawler
 
-      Role: !GetAtt GlueCrawlerRole.Arn
+      Role:
+        !GetAtt GlueCrawlerRole.Arn
 
-      DatabaseName: !Ref MovieDatabase
+      DatabaseName:
+        !Ref MovieDatabase
 
       Targets:
 
         S3Targets:
 
-          - Path: !Sub "s3://${PipelineBucket}/input/"
+          - Path:
+              !Sub "s3://${PipelineBucket}/input/"
 
       SchemaChangePolicy:
 
@@ -538,9 +587,9 @@ Resources:
         RecrawlBehavior: CRAWL_EVERYTHING
 
 
-  # --------------------------------------------------
+  # ==========================================================
   # START INPUT CRAWLER
-  # --------------------------------------------------
+  # ==========================================================
 
   StartMovieETLTrigger:
     Type: AWS::Glue::Trigger
@@ -551,16 +600,18 @@ Resources:
 
       Type: ON_DEMAND
 
-      WorkflowName: !Ref MovieETLWorkflow
+      WorkflowName:
+        !Ref MovieETLWorkflow
 
       Actions:
 
-        - CrawlerName: !Ref MovieInputCrawler
+        - CrawlerName:
+            !Ref MovieInputCrawler
 
 
-  # --------------------------------------------------
+  # ==========================================================
   # RUN GLUE JOB AFTER INPUT CRAWLER
-  # --------------------------------------------------
+  # ==========================================================
 
   RunMovieETLJobTrigger:
     Type: AWS::Glue::Trigger
@@ -571,7 +622,8 @@ Resources:
 
       Type: CONDITIONAL
 
-      WorkflowName: !Ref MovieETLWorkflow
+      WorkflowName:
+        !Ref MovieETLWorkflow
 
       StartOnCreation: true
 
@@ -583,18 +635,20 @@ Resources:
 
           - LogicalOperator: EQUALS
 
-            CrawlerName: !Ref MovieInputCrawler
+            CrawlerName:
+              !Ref MovieInputCrawler
 
             CrawlState: SUCCEEDED
 
       Actions:
 
-        - JobName: !Ref MovieETLJob
+        - JobName:
+            !Ref MovieETLJob
 
 
-  # --------------------------------------------------
-  # S3 -> EVENTBRIDGE AUTOMATIC TRIGGER
-  # --------------------------------------------------
+  # ==========================================================
+  # S3 → EVENTBRIDGE AUTOMATIC TRIGGER
+  # ==========================================================
 
   S3MovieUploadRule:
     Type: AWS::Events::Rule
@@ -603,7 +657,9 @@ Resources:
 
       Name: movie-s3-upload-trigger
 
-      Description: Trigger Lambda when a movie CSV is uploaded to the input prefix
+      Description: >
+        Trigger Lambda when a movie CSV is uploaded
+        to the input S3 prefix.
 
       EventPattern:
 
@@ -629,32 +685,37 @@ Resources:
 
       Targets:
 
-        - Arn: !GetAtt StartMovieETL.Arn
+        - Arn:
+            !GetAtt StartMovieETL.Arn
 
           Id: StartMovieETLTarget
 
 
-  # --------------------------------------------------
+  # ==========================================================
   # ALLOW EVENTBRIDGE TO INVOKE LAMBDA
-  # --------------------------------------------------
+  # ==========================================================
 
   AllowEventBridgeInvokeLambda:
     Type: AWS::Lambda::Permission
 
     Properties:
 
-      FunctionName: !Ref StartMovieETL
+      FunctionName:
+        !Ref StartMovieETL
 
-      Action: lambda:InvokeFunction
+      Action:
+        lambda:InvokeFunction
 
-      Principal: events.amazonaws.com
+      Principal:
+        events.amazonaws.com
 
-      SourceArn: !GetAtt S3MovieUploadRule.Arn
+      SourceArn:
+        !GetAtt S3MovieUploadRule.Arn
 
 
-  # --------------------------------------------------
+  # ==========================================================
   # OUTPUT CRAWLER IAM ROLE
-  # --------------------------------------------------
+  # ==========================================================
 
   GlueOutputCrawlerRole:
     Type: AWS::IAM::Role
@@ -680,7 +741,7 @@ Resources:
 
       Policies:
 
-        - PolicyName: GlueOutputCrawlerS3AndCatalogAccess
+        - PolicyName: GlueOutputCrawlerAccess
 
           PolicyDocument:
 
@@ -688,20 +749,31 @@ Resources:
 
             Statement:
 
-              # Read transformed movie files from output S3
-              - Effect: Allow
+              # List output bucket
+              - Sid: ListOutputBucket
+                Effect: Allow
 
                 Action:
-                  - s3:GetObject
                   - s3:ListBucket
 
                 Resource:
                   - !GetAtt OutputBucket.Arn
+
+
+              # Read transformed output files
+              - Sid: ReadOutputFiles
+                Effect: Allow
+
+                Action:
+                  - s3:GetObject
+
+                Resource:
                   - !Sub "${OutputBucket.Arn}/output/*"
 
 
-              # Create/update Glue Catalog objects
-              - Effect: Allow
+              # Glue Data Catalog access
+              - Sid: GlueCatalogAccess
+                Effect: Allow
 
                 Action:
                   - glue:GetDatabase
@@ -719,8 +791,9 @@ Resources:
                 Resource: "*"
 
 
-              # CloudWatch Logs
-              - Effect: Allow
+              # CloudWatch logs
+              - Sid: CrawlerLogging
+                Effect: Allow
 
                 Action:
                   - logs:CreateLogGroup
@@ -730,9 +803,9 @@ Resources:
                 Resource: "*"
 
 
-  # --------------------------------------------------
-  # OUTPUT CRAWLER
-  # --------------------------------------------------
+  # ==========================================================
+  # OUTPUT GLUE CRAWLER
+  # ==========================================================
 
   MovieOutputCrawler:
     Type: AWS::Glue::Crawler
@@ -741,15 +814,18 @@ Resources:
 
       Name: movie-output-crawler
 
-      Role: !GetAtt GlueOutputCrawlerRole.Arn
+      Role:
+        !GetAtt GlueOutputCrawlerRole.Arn
 
-      DatabaseName: !Ref MovieDatabase
+      DatabaseName:
+        !Ref MovieDatabase
 
       Targets:
 
         S3Targets:
 
-          - Path: !Sub "s3://${OutputBucket}/output/"
+          - Path:
+              !Sub "s3://${OutputBucket}/output/"
 
       SchemaChangePolicy:
 
@@ -762,9 +838,9 @@ Resources:
         RecrawlBehavior: CRAWL_EVERYTHING
 
 
-  # --------------------------------------------------
+  # ==========================================================
   # RUN OUTPUT CRAWLER AFTER GLUE JOB
-  # --------------------------------------------------
+  # ==========================================================
 
   RunMovieOutputCrawlerTrigger:
     Type: AWS::Glue::Trigger
@@ -775,7 +851,8 @@ Resources:
 
       Type: CONDITIONAL
 
-      WorkflowName: !Ref MovieETLWorkflow
+      WorkflowName:
+        !Ref MovieETLWorkflow
 
       StartOnCreation: true
 
@@ -787,72 +864,108 @@ Resources:
 
           - LogicalOperator: EQUALS
 
-            JobName: !Ref MovieETLJob
+            JobName:
+              !Ref MovieETLJob
 
             State: SUCCEEDED
 
       Actions:
 
-        - CrawlerName: !Ref MovieOutputCrawler
+        - CrawlerName:
+            !Ref MovieOutputCrawler
 
 
-# --------------------------------------------------
+# ==========================================================
 # OUTPUTS
-# --------------------------------------------------
+# ==========================================================
 
 Outputs:
 
   BucketName:
 
-    Description: Name of the pipeline input S3 bucket
+    Description:
+      Name of the pipeline input S3 bucket.
 
-    Value: !Ref PipelineBucket
+    Value:
+      !Ref PipelineBucket
 
 
   BucketArn:
 
-    Description: ARN of the pipeline input S3 bucket
+    Description:
+      ARN of the pipeline input S3 bucket.
 
-    Value: !GetAtt PipelineBucket.Arn
+    Value:
+      !GetAtt PipelineBucket.Arn
 
 
   OutputBucketName:
 
-    Description: Name of the transformed data S3 bucket
+    Description:
+      Name of the transformed data S3 bucket.
 
-    Value: !Ref OutputBucket
+    Value:
+      !Ref OutputBucket
 
 
   OutputBucketArn:
 
-    Description: ARN of the transformed data S3 bucket
+    Description:
+      ARN of the transformed data S3 bucket.
 
-    Value: !GetAtt OutputBucket.Arn
+    Value:
+      !GetAtt OutputBucket.Arn
 
 
   WorkflowName:
 
-    Description: Glue workflow name
+    Description:
+      Name of the Glue ETL workflow.
 
-    Value: !Ref MovieETLWorkflow
+    Value:
+      !Ref MovieETLWorkflow
 
 
   LambdaName:
 
-    Description: Lambda function name
+    Description:
+      Name of the Lambda trigger function.
 
-    Value: !Ref StartMovieETL
+    Value:
+      !Ref StartMovieETL
 
 
   DatabaseName:
 
-    Description: Glue Data Catalog database
+    Description:
+      Name of the Glue Data Catalog database.
 
-    Value: !Ref MovieDatabase
+    Value:
+      !Ref MovieDatabase
 
 
   CrawlerName:
 
-    Description: Glue input crawler name
+    Description:
+      Name of the input Glue crawler.
 
-    Value: !Ref MovieInputCrawler
+    Value:
+      !Ref MovieInputCrawler
+
+
+  OutputCrawlerName:
+
+    Description:
+      Name of the output Glue crawler.
+
+    Value:
+      !Ref MovieOutputCrawler
+
+
+  GlueJobName:
+
+    Description:
+      Name of the Glue Python Shell ETL job.
+
+    Value:
+      !Ref MovieETLJob

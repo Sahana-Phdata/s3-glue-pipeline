@@ -4,61 +4,103 @@ on:
   push:
     branches:
       - main
+
   workflow_dispatch:
 
 permissions:
   id-token: write
   contents: read
 
+
 jobs:
+
   deploy:
-    name: Deploy CloudFormation Stack
+    name: Deploy CloudFormation ETL Infrastructure
     runs-on: ubuntu-latest
 
     steps:
+
+      # ======================================================
+      # CHECKOUT
+      # ======================================================
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
+
+      # ======================================================
+      # AWS AUTHENTICATION
+      # ======================================================
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
+
         with:
           aws-region: ap-south-1
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
 
+
+      # ======================================================
+      # VERIFY AWS ACCOUNT
+      # ======================================================
+
       - name: Verify AWS identity
         run: |
-          echo "AWS identity:"
+          echo "========================================="
+          echo "AWS Identity"
+          echo "========================================="
+
           aws sts get-caller-identity
 
-      - name: Wait before CloudFormation deployment
-        run: |
-          echo "Waiting 10 seconds before checking CloudFormation..."
-          sleep 10
+          echo "========================================="
+
+
+      # ======================================================
+      # CHECK CLOUDFORMATION STACK
+      # ======================================================
 
       - name: Check CloudFormation stack state
         id: check-stack
         shell: bash
+
         run: |
+
           STATUS=$(aws cloudformation describe-stacks \
             --stack-name s3-glue-pipeline-infra \
             --region ap-south-1 \
             --query "Stacks[0].StackStatus" \
             --output text 2>/dev/null || echo "DOES_NOT_EXIST")
 
-          echo "Current stack status: $STATUS"
+          echo "Current CloudFormation stack status: $STATUS"
+
           echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+
+
+      # ======================================================
+      # DELETE ROLLBACK_COMPLETE STACK
+      # ======================================================
+      #
+      # CloudFormation cannot update a stack that is already
+      # in ROLLBACK_COMPLETE.
+      #
+      # We delete it first so the deployment can recreate it.
+      # ======================================================
 
       - name: Delete failed rollback stack
         if: steps.check-stack.outputs.status == 'ROLLBACK_COMPLETE'
+
         run: |
-          echo "Stack is in ROLLBACK_COMPLETE."
-          echo "Deleting failed stack before recreating it..."
+
+          echo "========================================="
+          echo "Stack is in ROLLBACK_COMPLETE"
+          echo "Deleting failed stack..."
+          echo "========================================="
 
           aws cloudformation delete-stack \
             --stack-name s3-glue-pipeline-infra \
             --region ap-south-1
 
-          echo "Waiting for stack deletion to complete..."
+          echo "Waiting for stack deletion..."
 
           aws cloudformation wait stack-delete-complete \
             --stack-name s3-glue-pipeline-infra \
@@ -66,9 +108,44 @@ jobs:
 
           echo "Failed stack deleted successfully."
 
+
+      # ======================================================
+      # STOP IF STACK IS DELETE_FAILED
+      # ======================================================
+      #
+      # A DELETE_FAILED stack may still contain resources.
+      # Automatically forcing another deployment would be
+      # unsafe.
+      # ======================================================
+
+      - name: Stop on DELETE_FAILED stack
+        if: steps.check-stack.outputs.status == 'DELETE_FAILED'
+
+        run: |
+
+          echo "========================================="
+          echo "ERROR: CloudFormation stack is DELETE_FAILED"
+          echo "========================================="
+
+          echo "The stack contains resources that could not"
+          echo "be deleted."
+
+          echo "Run the destroy workflow first or resolve"
+          echo "the failed resources before deploying again."
+
+          exit 1
+
+
+      # ======================================================
+      # VALIDATE CLOUDFORMATION TEMPLATE
+      # ======================================================
+
       - name: Validate CloudFormation template
         run: |
+
+          echo "========================================="
           echo "Validating CloudFormation template..."
+          echo "========================================="
 
           aws cloudformation validate-template \
             --template-body file://cloudformation/infrastructure.yaml \
@@ -76,9 +153,17 @@ jobs:
 
           echo "CloudFormation template validation successful."
 
+
+      # ======================================================
+      # DEPLOY COMPLETE INFRASTRUCTURE
+      # ======================================================
+
       - name: Deploy CloudFormation stack
         run: |
-          echo "Deploying CloudFormation infrastructure..."
+
+          echo "========================================="
+          echo "Deploying ETL infrastructure..."
+          echo "========================================="
 
           aws cloudformation deploy \
             --template-file cloudformation/infrastructure.yaml \
@@ -87,11 +172,48 @@ jobs:
             --capabilities CAPABILITY_NAMED_IAM \
             --role-arn "${{ secrets.CLOUDFORMATION_ROLE_ARN }}"
 
+          echo "========================================="
           echo "CloudFormation deployment successful."
+          echo "========================================="
+
+
+      # ======================================================
+      # WAIT FOR STACK TO COMPLETE
+      # ======================================================
+
+      - name: Verify stack status
+        run: |
+
+          echo "Checking final CloudFormation status..."
+
+          STATUS=$(aws cloudformation describe-stacks \
+            --stack-name s3-glue-pipeline-infra \
+            --region ap-south-1 \
+            --query "Stacks[0].StackStatus" \
+            --output text)
+
+          echo "Final stack status: $STATUS"
+
+          if [ "$STATUS" != "CREATE_COMPLETE" ] && \
+             [ "$STATUS" != "UPDATE_COMPLETE" ]; then
+
+            echo "CloudFormation deployment did not complete successfully."
+
+            exit 1
+          fi
+
+          echo "CloudFormation stack is healthy."
+
+
+      # ======================================================
+      # GET BUCKET NAMES
+      # ======================================================
 
       - name: Get S3 bucket names
         id: get-buckets
+
         run: |
+
           INPUT_BUCKET=$(aws cloudformation describe-stacks \
             --stack-name s3-glue-pipeline-infra \
             --region ap-south-1 \
@@ -110,32 +232,52 @@ jobs:
           echo "input_bucket=$INPUT_BUCKET" >> "$GITHUB_OUTPUT"
           echo "output_bucket=$OUTPUT_BUCKET" >> "$GITHUB_OUTPUT"
 
+
+      # ======================================================
+      # CREATE S3 FOLDER MARKERS
+      # ======================================================
+
       - name: Create S3 input and output folders
         run: |
+
           INPUT_BUCKET="${{ steps.get-buckets.outputs.input_bucket }}"
           OUTPUT_BUCKET="${{ steps.get-buckets.outputs.output_bucket }}"
 
-          echo "Creating input/ folder in input bucket..."
+          echo "Creating input/ folder..."
+
           aws s3api put-object \
             --bucket "$INPUT_BUCKET" \
             --key "input/" \
             --region ap-south-1
 
-          echo "Creating output/ folder in output bucket..."
+          echo "Creating output/ folder..."
+
           aws s3api put-object \
             --bucket "$OUTPUT_BUCKET" \
             --key "output/" \
             --region ap-south-1
 
-          echo "S3 input/ and output/ folders created successfully."
+          echo "S3 folders created successfully."
+
+
+      # ======================================================
+      # UPLOAD GLUE SCRIPT
+      # ======================================================
 
       - name: Upload Glue ETL script
         run: |
+
           INPUT_BUCKET="${{ steps.get-buckets.outputs.input_bucket }}"
 
+          echo "========================================="
           echo "Uploading Glue ETL script..."
-          echo "Source: glue/glue_job.py"
-          echo "Destination: s3://$INPUT_BUCKET/glue/glue_job.py"
+          echo "========================================="
+
+          echo "Source:"
+          echo "glue/glue_job.py"
+
+          echo "Destination:"
+          echo "s3://$INPUT_BUCKET/glue/glue_job.py"
 
           aws s3 cp \
             glue/glue_job.py \
@@ -144,35 +286,57 @@ jobs:
 
           echo "Glue ETL script uploaded successfully."
 
+
+      # ======================================================
+      # VERIFY GLUE SCRIPT
+      # ======================================================
+
       - name: Verify Glue ETL script
         run: |
+
           INPUT_BUCKET="${{ steps.get-buckets.outputs.input_bucket }}"
 
-          echo "Verifying Glue script in S3..."
+          echo "Verifying Glue script..."
 
           aws s3 ls \
             "s3://$INPUT_BUCKET/glue/glue_job.py" \
             --region ap-south-1
 
-          echo "Glue ETL script verified successfully."
+          echo "Glue script verified successfully."
+
+
+      # ======================================================
+      # VERIFY S3 FOLDERS
+      # ======================================================
 
       - name: Verify S3 folders
         run: |
+
           INPUT_BUCKET="${{ steps.get-buckets.outputs.input_bucket }}"
           OUTPUT_BUCKET="${{ steps.get-buckets.outputs.output_bucket }}"
 
           echo "Verifying input/ folder..."
-          aws s3 ls "s3://$INPUT_BUCKET/input/" \
+
+          aws s3 ls \
+            "s3://$INPUT_BUCKET/input/" \
             --region ap-south-1
 
           echo "Verifying output/ folder..."
-          aws s3 ls "s3://$OUTPUT_BUCKET/output/" \
+
+          aws s3 ls \
+            "s3://$OUTPUT_BUCKET/output/" \
             --region ap-south-1
 
           echo "S3 folders verified successfully."
 
+
+      # ======================================================
+      # SHOW CLOUDFORMATION OUTPUTS
+      # ======================================================
+
       - name: Show stack outputs
         run: |
+
           echo "========================================="
           echo "CloudFormation Stack Outputs"
           echo "========================================="
@@ -184,5 +348,5 @@ jobs:
             --output table
 
           echo "========================================="
-          echo "Deployment completed successfully."
+          echo "DEPLOYMENT COMPLETED SUCCESSFULLY"
           echo "========================================="
