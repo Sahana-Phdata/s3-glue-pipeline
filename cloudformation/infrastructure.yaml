@@ -644,7 +644,6 @@ Resources:
 
         - JobName:
             !Ref MovieETLJob
-
   # --------------------------------------------------
   # EVENTBRIDGE - S3 CSV UPLOAD TRIGGER
   # --------------------------------------------------
@@ -671,15 +670,13 @@ Resources:
 
           object:
             key:
-              - prefix: input/
-                suffix: .csv
+              - wildcard: "input/*.csv"
 
       State: ENABLED
 
       Targets:
         - Arn: !GetAtt StartMovieETL.Arn
           Id: StartMovieETLTarget
-
           
   # ==========================================================
   # ALLOW EVENTBRIDGE TO INVOKE LAMBDA
