@@ -378,11 +378,9 @@ Resources:
                 Action:
                   - glue:StartWorkflowRun
 
+                
                 Resource:
-                  - !Sub >
-                    arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:workflow/movie-etl-workflow
-
-
+                  - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:workflow/movie-etl-workflow"
   # ==========================================================
   # LAMBDA FUNCTION
   # ==========================================================
