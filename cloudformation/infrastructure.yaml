@@ -216,6 +216,15 @@ Resources:
                 Resource:
                   - !Sub "${PipelineBucket.Arn}/input/*"
 
+              - Sid: ReadGlueScript
+                Effect: Allow
+
+                Action:
+                  - s3:GetObject
+
+                Resource:
+                  - !Sub "${PipelineBucket.Arn}/glue/glue_job.py"
+
 
               # Read/write required temporary files
               - Sid: GlueTempBucketAccess

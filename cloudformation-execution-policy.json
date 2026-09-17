@@ -1,0 +1,139 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "S3Management",
+      "Effect": "Allow",
+      "Action": [
+        "s3:CreateBucket",
+        "s3:DeleteBucket",
+        "s3:GetBucketLocation",
+
+        "s3:GetBucketPolicy",
+        "s3:PutBucketPolicy",
+        "s3:DeleteBucketPolicy",
+
+        "s3:GetEncryptionConfiguration",
+        "s3:PutEncryptionConfiguration",
+
+        "s3:GetPublicAccessBlock",
+        "s3:PutBucketPublicAccessBlock",
+
+        "s3:GetBucketOwnershipControls",
+        "s3:PutBucketOwnershipControls",
+
+        "s3:GetLifecycleConfiguration",
+        "s3:PutLifecycleConfiguration",
+
+        "s3:GetBucketNotification",
+        "s3:PutBucketNotification",
+
+        "s3:GetBucketVersioning",
+        "s3:PutBucketVersioning",
+
+        "s3:ListBucket"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "LambdaManagement",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:CreateFunction",
+        "lambda:UpdateFunctionCode",
+        "lambda:UpdateFunctionConfiguration",
+        "lambda:DeleteFunction",
+        "lambda:GetFunction",
+        "lambda:GetFunctionConfiguration",
+        "lambda:AddPermission",
+        "lambda:RemovePermission",
+        "lambda:TagResource",
+        "lambda:UntagResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "GlueManagement",
+      "Effect": "Allow",
+      "Action": [
+        "glue:CreateDatabase",
+        "glue:UpdateDatabase",
+        "glue:DeleteDatabase",
+        "glue:GetDatabase",
+        "glue:CreateJob",
+        "glue:UpdateJob",
+        "glue:DeleteJob",
+        "glue:GetJob",
+        "glue:CreateWorkflow",
+        "glue:UpdateWorkflow",
+        "glue:DeleteWorkflow",
+        "glue:GetWorkflow",
+        "glue:CreateTrigger",
+        "glue:UpdateTrigger",
+        "glue:DeleteTrigger",
+        "glue:GetTrigger",
+        "glue:CreateCrawler",
+        "glue:UpdateCrawler",
+        "glue:DeleteCrawler",
+        "glue:GetCrawler",
+        "glue:GetCrawlers",
+        "glue:StartCrawler",
+        "glue:StopCrawler"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "EventBridgeManagement",
+      "Effect": "Allow",
+      "Action": [
+        "events:PutRule",
+        "events:DeleteRule",
+        "events:DescribeRule",
+        "events:PutTargets",
+        "events:RemoveTargets",
+        "events:ListTargetsByRule"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "LogsManagement",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:DeleteLogGroup",
+        "logs:DescribeLogGroups",
+        "logs:PutRetentionPolicy",
+        "logs:DeleteRetentionPolicy"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "IAMRoleManagement",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:GetRole",
+        "iam:UpdateRole",
+        "iam:PutRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:PassRole",
+        "iam:TagRole",
+        "iam:UntagRole"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "CloudWatchManagement",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:PutMetricAlarm",
+        "cloudwatch:DeleteAlarms",
+        "cloudwatch:DescribeAlarms"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

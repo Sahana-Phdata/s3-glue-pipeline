@@ -11,7 +11,7 @@
       "Condition": {
         "StringEquals": {
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-          "token.actions.githubusercontent.com:sub": "repo:Sahana-Phdata/s3-glue-pipeline:ref:refs/heads/main"
+          "token.actions.githubusercontent.com:sub": "repo:Sahana-Phdata@315033263/s3-glue-pipeline@1359779910:ref:refs/heads/main"
         }
       }
     }
