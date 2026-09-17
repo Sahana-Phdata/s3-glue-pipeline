@@ -24,6 +24,8 @@ jobs:
             exit 1
           fi
 
+          echo "Deletion confirmed."
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -35,10 +37,12 @@ jobs:
 
       - name: Verify AWS identity
         run: |
+          echo "AWS identity:"
           aws sts get-caller-identity
 
       - name: Check CloudFormation stack
         id: stack
+        shell: bash
         run: |
           STATUS=$(aws cloudformation describe-stacks \
             --stack-name s3-glue-pipeline-infra \
@@ -52,6 +56,7 @@ jobs:
       - name: Get S3 bucket names
         id: buckets
         if: steps.stack.outputs.status != 'NOT_FOUND'
+        shell: bash
         run: |
           INPUT_BUCKET=$(aws cloudformation describe-stacks \
             --stack-name s3-glue-pipeline-infra \
@@ -65,55 +70,120 @@ jobs:
             --query "Stacks[0].Outputs[?OutputKey=='OutputBucketName'].OutputValue" \
             --output text)
 
-          echo "Input bucket: $INPUT_BUCKET"
+          if [ -z "$INPUT_BUCKET" ] || [ "$INPUT_BUCKET" = "None" ]; then
+            echo "ERROR: Could not determine input bucket."
+            exit 1
+          fi
+
+          if [ -z "$OUTPUT_BUCKET" ] || [ "$OUTPUT_BUCKET" = "None" ]; then
+            echo "ERROR: Could not determine output bucket."
+            exit 1
+          fi
+
+          echo "Input bucket : $INPUT_BUCKET"
           echo "Output bucket: $OUTPUT_BUCKET"
 
           echo "input_bucket=$INPUT_BUCKET" >> "$GITHUB_OUTPUT"
           echo "output_bucket=$OUTPUT_BUCKET" >> "$GITHUB_OUTPUT"
 
       - name: Empty input S3 bucket
-        if: steps.stack.outputs.status != 'NOT_FOUND' && steps.buckets.outputs.input_bucket != ''
+        if: steps.stack.outputs.status != 'NOT_FOUND'
+        shell: bash
         run: |
-          echo "Removing all objects from input bucket..."
-          aws s3 rm "s3://${{ steps.buckets.outputs.input_bucket }}" \
-            --recursive \
-            --region ap-south-1
+          BUCKET="${{ steps.buckets.outputs.input_bucket }}"
+
+          echo "========================================="
+          echo "Emptying input bucket: $BUCKET"
+          echo "========================================="
+
+          for ATTEMPT in 1 2 3; do
+            echo "Cleanup attempt $ATTEMPT..."
+
+            aws s3 rm "s3://$BUCKET" \
+              --recursive \
+              --region ap-south-1
+
+            REMAINING=$(aws s3api list-objects-v2 \
+              --bucket "$BUCKET" \
+              --region ap-south-1 \
+              --query 'length(Contents || `[]`)' \
+              --output text)
+
+            echo "Remaining objects: $REMAINING"
+
+            if [ "$REMAINING" = "0" ]; then
+              echo "Input bucket is empty."
+              exit 0
+            fi
+
+            if [ "$ATTEMPT" -lt 3 ]; then
+              echo "Objects are still present. Retrying..."
+              sleep 5
+            fi
+          done
+
+          echo "ERROR: Input bucket is still not empty after 3 attempts."
+          aws s3 ls "s3://$BUCKET" --recursive --region ap-south-1 || true
+          exit 1
 
       - name: Empty output S3 bucket
-        if: steps.stack.outputs.status != 'NOT_FOUND' && steps.buckets.outputs.output_bucket != ''
-        run: |
-          echo "Removing all objects from output bucket..."
-          aws s3 rm "s3://${{ steps.buckets.outputs.output_bucket }}" \
-            --recursive \
-            --region ap-south-1
-
-      - name: Verify S3 buckets are empty
         if: steps.stack.outputs.status != 'NOT_FOUND'
+        shell: bash
         run: |
-          if [ -n "${{ steps.buckets.outputs.input_bucket }}" ]; then
-            echo "Checking input bucket..."
-            aws s3 ls "s3://${{ steps.buckets.outputs.input_bucket }}/" \
-              --region ap-south-1 || true
-          fi
+          BUCKET="${{ steps.buckets.outputs.output_bucket }}"
 
-          if [ -n "${{ steps.buckets.outputs.output_bucket }}" ]; then
-            echo "Checking output bucket..."
-            aws s3 ls "s3://${{ steps.buckets.outputs.output_bucket }}/" \
-              --region ap-south-1 || true
-          fi
+          echo "========================================="
+          echo "Emptying output bucket: $BUCKET"
+          echo "========================================="
+
+          for ATTEMPT in 1 2 3; do
+            echo "Cleanup attempt $ATTEMPT..."
+
+            aws s3 rm "s3://$BUCKET" \
+              --recursive \
+              --region ap-south-1
+
+            REMAINING=$(aws s3api list-objects-v2 \
+              --bucket "$BUCKET" \
+              --region ap-south-1 \
+              --query 'length(Contents || `[]`)' \
+              --output text)
+
+            echo "Remaining objects: $REMAINING"
+
+            if [ "$REMAINING" = "0" ]; then
+              echo "Output bucket is empty."
+              exit 0
+            fi
+
+            if [ "$ATTEMPT" -lt 3 ]; then
+              echo "Objects are still present. Retrying..."
+              sleep 5
+            fi
+          done
+
+          echo "ERROR: Output bucket is still not empty after 3 attempts."
+          aws s3 ls "s3://$BUCKET" --recursive --region ap-south-1 || true
+          exit 1
 
       - name: Delete CloudFormation stack
         if: steps.stack.outputs.status != 'NOT_FOUND'
+        shell: bash
         run: |
+          echo "========================================="
           echo "Deleting CloudFormation stack..."
+          echo "========================================="
 
           aws cloudformation delete-stack \
             --stack-name s3-glue-pipeline-infra \
             --region ap-south-1 \
             --role-arn "${{ secrets.CLOUDFORMATION_ROLE_ARN }}"
 
+          echo "CloudFormation deletion started."
+
       - name: Wait for stack deletion
         if: steps.stack.outputs.status != 'NOT_FOUND'
+        shell: bash
         run: |
           echo "Waiting for CloudFormation deletion..."
 
@@ -133,20 +203,23 @@ jobs:
             exit 1
           fi
 
+          echo "CloudFormation stack deleted successfully."
+
       - name: Confirm deletion
+        shell: bash
         run: |
           if aws cloudformation describe-stacks \
             --stack-name s3-glue-pipeline-infra \
             --region ap-south-1 >/dev/null 2>&1; then
 
-            echo "Stack still exists."
+            echo "ERROR: Stack still exists."
             exit 1
           fi
 
           echo "======================================"
           echo "AWS application infrastructure deleted"
           echo "======================================"
-          echo "Input bucket: ${{ steps.buckets.outputs.input_bucket }}"
+          echo "Input bucket : ${{ steps.buckets.outputs.input_bucket }}"
           echo "Output bucket: ${{ steps.buckets.outputs.output_bucket }}"
           echo "CloudFormation stack: s3-glue-pipeline-infra"
           echo "======================================"
