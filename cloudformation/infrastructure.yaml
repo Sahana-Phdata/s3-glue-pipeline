@@ -645,24 +645,19 @@ Resources:
         - JobName:
             !Ref MovieETLJob
 
-
-  # ==========================================================
-  # S3 → EVENTBRIDGE AUTOMATIC TRIGGER
-  # ==========================================================
+  # --------------------------------------------------
+  # EVENTBRIDGE - S3 CSV UPLOAD TRIGGER
+  # --------------------------------------------------
 
   S3MovieUploadRule:
     Type: AWS::Events::Rule
 
     Properties:
-
       Name: movie-s3-upload-trigger
 
-      Description: >
-        Trigger Lambda when a movie CSV is uploaded
-        to the input S3 prefix.
+      Description: Trigger Lambda when a CSV file is uploaded to the input prefix
 
       EventPattern:
-
         source:
           - aws.s3
 
@@ -670,27 +665,22 @@ Resources:
           - Object Created
 
         detail:
-
           bucket:
-
             name:
               - !Ref PipelineBucket
 
           object:
-
             key:
               - prefix: input/
+                suffix: .csv
 
       State: ENABLED
 
       Targets:
-
-        - Arn:
-            !GetAtt StartMovieETL.Arn
-
+        - Arn: !GetAtt StartMovieETL.Arn
           Id: StartMovieETLTarget
 
-
+          
   # ==========================================================
   # ALLOW EVENTBRIDGE TO INVOKE LAMBDA
   # ==========================================================

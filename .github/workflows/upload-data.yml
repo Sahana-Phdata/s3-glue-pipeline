@@ -1,0 +1,160 @@
+name: Upload Movie Data to S3
+
+on:
+  push:
+    paths:
+      - 'sample-data/movies*.csv'
+      - 'sample_data/movies*.csv'
+
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  upload-data:
+    name: Upload CSV Data to S3
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # --------------------------------------------------
+      # CHECKOUT REPOSITORY
+      # --------------------------------------------------
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+
+      # --------------------------------------------------
+      # CONFIGURE AWS USING OIDC
+      # --------------------------------------------------
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+
+        with:
+          aws-region: ap-south-1
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+
+
+      # --------------------------------------------------
+      # VERIFY AWS IDENTITY
+      # --------------------------------------------------
+
+      - name: Verify AWS identity
+        run: |
+          echo "AWS identity:"
+          aws sts get-caller-identity
+
+
+      # --------------------------------------------------
+      # GET INPUT BUCKET FROM CLOUDFORMATION
+      # --------------------------------------------------
+
+      - name: Get input bucket name
+        id: bucket
+        shell: bash
+        run: |
+
+          INPUT_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name s3-glue-pipeline-infra \
+            --region ap-south-1 \
+            --query "Stacks[0].Outputs[?OutputKey=='BucketName'].OutputValue" \
+            --output text)
+
+          if [ -z "$INPUT_BUCKET" ] || [ "$INPUT_BUCKET" = "None" ]; then
+            echo "ERROR: Could not determine input S3 bucket."
+            exit 1
+          fi
+
+          echo "Input bucket: $INPUT_BUCKET"
+
+          echo "input_bucket=$INPUT_BUCKET" >> "$GITHUB_OUTPUT"
+
+
+      # --------------------------------------------------
+      # FIND MOVIE CSV
+      # --------------------------------------------------
+
+      - name: Find movie CSV
+        id: find-csv
+        shell: bash
+        run: |
+
+          MOVIE_FILE=""
+
+          if [ -d "sample-data" ]; then
+            MOVIE_FILE=$(find sample-data \
+              -maxdepth 1 \
+              -type f \
+              -iname 'movies*.csv' \
+              -print \
+              -quit)
+          fi
+
+          if [ -z "$MOVIE_FILE" ] && [ -d "sample_data" ]; then
+            MOVIE_FILE=$(find sample_data \
+              -maxdepth 1 \
+              -type f \
+              -iname 'movies*.csv' \
+              -print \
+              -quit)
+          fi
+
+          if [ -z "$MOVIE_FILE" ]; then
+            echo "ERROR: No movies CSV file was found."
+            echo "Expected a file such as:"
+            echo "  sample-data/movies.csv"
+            echo "  sample-data/movies_3.csv"
+            echo "  sample_data/movies.csv"
+            exit 1
+          fi
+
+          echo "Movie CSV found: $MOVIE_FILE"
+
+          echo "movie_file=$MOVIE_FILE" >> "$GITHUB_OUTPUT"
+
+
+      # --------------------------------------------------
+      # UPLOAD CSV TO S3
+      # --------------------------------------------------
+
+      - name: Upload CSV to S3 input folder
+        shell: bash
+        run: |
+
+          INPUT_BUCKET="${{ steps.bucket.outputs.input_bucket }}"
+          MOVIE_FILE="${{ steps.find-csv.outputs.movie_file }}"
+
+          echo "Uploading:"
+          echo "  Local file : $MOVIE_FILE"
+          echo "  S3 bucket  : $INPUT_BUCKET"
+          echo "  S3 key     : input/movies.csv"
+
+          aws s3 cp \
+            "$MOVIE_FILE" \
+            "s3://${INPUT_BUCKET}/input/movies.csv" \
+            --region ap-south-1
+
+          echo "CSV upload completed successfully."
+
+
+      # --------------------------------------------------
+      # VERIFY UPLOAD
+      # --------------------------------------------------
+
+      - name: Verify CSV exists in S3
+        shell: bash
+        run: |
+
+          INPUT_BUCKET="${{ steps.bucket.outputs.input_bucket }}"
+
+          echo "Checking S3 input object..."
+
+          aws s3 ls \
+            "s3://${INPUT_BUCKET}/input/movies.csv" \
+            --region ap-south-1
+
+          echo "CSV successfully uploaded to S3."
