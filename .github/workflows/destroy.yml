@@ -98,6 +98,7 @@ jobs:
           echo "Cleaning input bucket: $BUCKET"
           echo "========================================="
 
+          # Treat an already-deleted bucket as successfully cleaned.
           if ! aws s3api head-bucket \
             --bucket "$BUCKET" \
             --region ap-south-1 2>/dev/null; then
@@ -142,6 +143,7 @@ jobs:
           aws s3 ls "s3://$BUCKET" \
             --recursive \
             --region ap-south-1 || true
+
           exit 1
 
       - name: Empty output S3 bucket
@@ -154,6 +156,7 @@ jobs:
           echo "Cleaning output bucket: $BUCKET"
           echo "========================================="
 
+          # Treat an already-deleted bucket as successfully cleaned.
           if ! aws s3api head-bucket \
             --bucket "$BUCKET" \
             --region ap-south-1 2>/dev/null; then
@@ -199,6 +202,7 @@ jobs:
           aws s3 ls "s3://$BUCKET" \
             --recursive \
             --region ap-south-1 || true
+
           exit 1
 
       - name: Delete CloudFormation stack
