@@ -18,6 +18,7 @@ jobs:
 
     steps:
       - name: Verify deletion confirmation
+        shell: bash
         run: |
           if [ "${{ github.event.inputs.confirm }}" != "DELETE" ]; then
             echo "Confirmation failed. Type DELETE exactly."
@@ -36,6 +37,7 @@ jobs:
           aws-region: ap-south-1
 
       - name: Verify AWS identity
+        shell: bash
         run: |
           echo "AWS identity:"
           aws sts get-caller-identity
@@ -93,8 +95,17 @@ jobs:
           BUCKET="${{ steps.buckets.outputs.input_bucket }}"
 
           echo "========================================="
-          echo "Emptying input bucket: $BUCKET"
+          echo "Cleaning input bucket: $BUCKET"
           echo "========================================="
+
+          if ! aws s3api head-bucket \
+            --bucket "$BUCKET" \
+            --region ap-south-1 2>/dev/null; then
+
+            echo "Input bucket does not exist."
+            echo "Nothing to clean."
+            exit 0
+          fi
 
           for ATTEMPT in 1 2 3; do
             echo "Cleanup attempt $ATTEMPT..."
@@ -107,7 +118,12 @@ jobs:
               --bucket "$BUCKET" \
               --region ap-south-1 \
               --query 'length(Contents || `[]`)' \
-              --output text)
+              --output text 2>/dev/null || echo "BUCKET_MISSING")
+
+            if [ "$REMAINING" = "BUCKET_MISSING" ]; then
+              echo "Input bucket no longer exists."
+              exit 0
+            fi
 
             echo "Remaining objects: $REMAINING"
 
@@ -123,7 +139,9 @@ jobs:
           done
 
           echo "ERROR: Input bucket is still not empty after 3 attempts."
-          aws s3 ls "s3://$BUCKET" --recursive --region ap-south-1 || true
+          aws s3 ls "s3://$BUCKET" \
+            --recursive \
+            --region ap-south-1 || true
           exit 1
 
       - name: Empty output S3 bucket
@@ -133,8 +151,18 @@ jobs:
           BUCKET="${{ steps.buckets.outputs.output_bucket }}"
 
           echo "========================================="
-          echo "Emptying output bucket: $BUCKET"
+          echo "Cleaning output bucket: $BUCKET"
           echo "========================================="
+
+          if ! aws s3api head-bucket \
+            --bucket "$BUCKET" \
+            --region ap-south-1 2>/dev/null; then
+
+            echo "Output bucket does not exist."
+            echo "It may already have been deleted."
+            echo "Nothing to clean."
+            exit 0
+          fi
 
           for ATTEMPT in 1 2 3; do
             echo "Cleanup attempt $ATTEMPT..."
@@ -147,7 +175,12 @@ jobs:
               --bucket "$BUCKET" \
               --region ap-south-1 \
               --query 'length(Contents || `[]`)' \
-              --output text)
+              --output text 2>/dev/null || echo "BUCKET_MISSING")
+
+            if [ "$REMAINING" = "BUCKET_MISSING" ]; then
+              echo "Output bucket no longer exists."
+              exit 0
+            fi
 
             echo "Remaining objects: $REMAINING"
 
@@ -163,7 +196,9 @@ jobs:
           done
 
           echo "ERROR: Output bucket is still not empty after 3 attempts."
-          aws s3 ls "s3://$BUCKET" --recursive --region ap-south-1 || true
+          aws s3 ls "s3://$BUCKET" \
+            --recursive \
+            --region ap-south-1 || true
           exit 1
 
       - name: Delete CloudFormation stack
