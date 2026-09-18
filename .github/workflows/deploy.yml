@@ -238,6 +238,34 @@ jobs:
 
 
       # ======================================================
+      # CREATE S3 PREFIX MARKERS
+      # ======================================================
+
+      - name: Create S3 input, output, and Glue folders
+        run: |
+
+          INPUT_BUCKET="${{ steps.get-buckets.outputs.input_bucket }}"
+          OUTPUT_BUCKET="${{ steps.get-buckets.outputs.output_bucket }}"
+
+          aws s3api put-object \
+            --bucket "$INPUT_BUCKET" \
+            --key "input/" \
+            --region ap-south-1
+
+          aws s3api put-object \
+            --bucket "$INPUT_BUCKET" \
+            --key "glue/" \
+            --region ap-south-1
+
+          aws s3api put-object \
+            --bucket "$OUTPUT_BUCKET" \
+            --key "output/" \
+            --region ap-south-1
+
+          echo "S3 prefixes created successfully."
+
+
+      # ======================================================
       # UPLOAD GLUE SCRIPT
       # ======================================================
 
