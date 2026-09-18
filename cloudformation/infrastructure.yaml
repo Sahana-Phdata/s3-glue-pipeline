@@ -156,6 +156,8 @@ Resources:
     Properties:
       Name: movie-etl-workflow
 
+      MaxConcurrentRuns: 1
+
       Description: >
         Workflow for the movie data ETL pipeline.
 
@@ -293,6 +295,23 @@ Resources:
                 Resource: "*"
 
 
+        - PolicyName: GlueWorkflowRunProperties
+
+          PolicyDocument:
+            Version: '2012-10-17'
+
+            Statement:
+
+              - Sid: ReadWorkflowRunProperties
+                Effect: Allow
+
+                Action:
+                  - glue:GetWorkflowRunProperties
+
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:workflow/movie-etl-workflow"
+
+
   # ==========================================================
   # GLUE PYTHON SHELL JOB
   # ==========================================================
@@ -420,6 +439,8 @@ Resources:
           import boto3
           import os
           import logging
+          import time
+          from urllib.parse import unquote_plus
 
           logger = logging.getLogger()
           logger.setLevel(logging.INFO)
@@ -433,9 +454,27 @@ Resources:
 
               logger.info("Received event: %s", event)
 
-              response = glue.start_workflow_run(
-                  Name=WORKFLOW_NAME
-              )
+              input_key = unquote_plus(event["detail"]["object"]["key"])
+
+              for attempt in range(5):
+                  try:
+                      response = glue.start_workflow_run(
+                          Name=WORKFLOW_NAME,
+                          RunProperties={
+                              "INPUT_KEY": input_key
+                          }
+                      )
+                      break
+                  except glue.exceptions.ConcurrentRunsExceededException:
+                      if attempt == 4:
+                          raise
+
+                      retry_delay = 2 ** attempt
+                      logger.warning(
+                          "Workflow is already running; retrying in %s seconds",
+                          retry_delay
+                      )
+                      time.sleep(retry_delay)
 
               workflow_run_id = response["RunId"]
 
@@ -544,7 +583,10 @@ Resources:
                   - glue:GetPartition
                   - glue:GetPartitions
 
-                Resource: "*"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:catalog"
+                  - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:database/movie_etl_db"
+                  - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:table/movie_etl_db/*"
 
 
               # CloudWatch logs
@@ -782,7 +824,10 @@ Resources:
                   - glue:GetPartition
                   - glue:GetPartitions
 
-                Resource: "*"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:catalog"
+                  - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:database/movie_etl_db"
+                  - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:table/movie_etl_db/*"
 
 
               # CloudWatch logs

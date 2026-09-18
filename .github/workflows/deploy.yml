@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - main
+    paths:
+      - ".github/workflows/deploy.yml"
+      - "cloudformation/**"
+      - "glue/**"
 
   workflow_dispatch:
 
@@ -234,33 +238,6 @@ jobs:
 
 
       # ======================================================
-      # CREATE S3 FOLDER MARKERS
-      # ======================================================
-
-      - name: Create S3 input and output folders
-        run: |
-
-          INPUT_BUCKET="${{ steps.get-buckets.outputs.input_bucket }}"
-          OUTPUT_BUCKET="${{ steps.get-buckets.outputs.output_bucket }}"
-
-          echo "Creating input/ folder..."
-
-          aws s3api put-object \
-            --bucket "$INPUT_BUCKET" \
-            --key "input/" \
-            --region ap-south-1
-
-          echo "Creating output/ folder..."
-
-          aws s3api put-object \
-            --bucket "$OUTPUT_BUCKET" \
-            --key "output/" \
-            --region ap-south-1
-
-          echo "S3 folders created successfully."
-
-
-      # ======================================================
       # UPLOAD GLUE SCRIPT
       # ======================================================
 
@@ -303,31 +280,6 @@ jobs:
             --region ap-south-1
 
           echo "Glue script verified successfully."
-
-
-      # ======================================================
-      # VERIFY S3 FOLDERS
-      # ======================================================
-
-      - name: Verify S3 folders
-        run: |
-
-          INPUT_BUCKET="${{ steps.get-buckets.outputs.input_bucket }}"
-          OUTPUT_BUCKET="${{ steps.get-buckets.outputs.output_bucket }}"
-
-          echo "Verifying input/ folder..."
-
-          aws s3 ls \
-            "s3://$INPUT_BUCKET/input/" \
-            --region ap-south-1
-
-          echo "Verifying output/ folder..."
-
-          aws s3 ls \
-            "s3://$OUTPUT_BUCKET/output/" \
-            --region ap-south-1
-
-          echo "S3 folders verified successfully."
 
 
       # ======================================================

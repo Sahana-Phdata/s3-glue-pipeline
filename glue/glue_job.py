@@ -10,14 +10,32 @@ def main():
     # Get parameters passed by the Glue job
     args = getResolvedOptions(
         sys.argv,
-        ["INPUT_BUCKET", "OUTPUT_BUCKET"]
+        [
+            "INPUT_BUCKET",
+            "OUTPUT_BUCKET",
+            "WORKFLOW_NAME",
+            "WORKFLOW_RUN_ID"
+        ]
     )
 
     input_bucket = args["INPUT_BUCKET"]
     output_bucket = args["OUTPUT_BUCKET"]
 
-    input_key = "input/movies.csv"
-    output_key = "output/movies_transformed.csv"
+    glue = boto3.client("glue")
+    workflow_properties = glue.get_workflow_run_properties(
+        Name=args["WORKFLOW_NAME"],
+        RunId=args["WORKFLOW_RUN_ID"]
+    )["RunProperties"]
+
+    input_key = workflow_properties["INPUT_KEY"]
+    input_filename = input_key.rsplit("/", 1)[-1]
+    output_filename = re.sub(
+        r"\.csv$",
+        "_transformed.csv",
+        input_filename,
+        flags=re.IGNORECASE
+    )
+    output_key = f"output/{output_filename}"
 
     s3 = boto3.client("s3")
 

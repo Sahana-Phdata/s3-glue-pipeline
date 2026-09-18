@@ -83,9 +83,6 @@ s3-glue-event-pipeline/
 ├── glue/
 │   └── glue_job.py
 │
-├── lambda/
-│   └── lambda_function.py
-│
 ├── sample-data/
 │   └── sample.csv
 │
