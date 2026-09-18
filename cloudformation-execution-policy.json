@@ -36,6 +36,19 @@
       "Resource": "*"
     },
     {
+      "Sid": "S3ObjectManagement",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::movie-etl-input-*/*",
+        "arn:aws:s3:::movie-etl-output-*/*"
+      ]
+    },
+    {
       "Sid": "LambdaManagement",
       "Effect": "Allow",
       "Action": [
